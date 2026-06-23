@@ -527,11 +527,9 @@ const AY_OPTIONS = [
   'AY 2018-19','AY 2019-20','AY 2020-21','AY 2021-22','AY 2022-23','AY 2023-24','AY 2024-25','AY 2025-26','AY 2026-27'
 ];
 const STATUSES = ['all','pending','review','approved','done'];
-const TEAM = (p.initialData && p.initialData.people && p.initialData.people.length)
-  ? p.initialData.people.map((person,i)=>({id:person.id,name:person.name,idx:i}))
-  : [{id:'RK',name:'Raj Kumar',idx:0},{id:'PK',name:'Priya K',idx:1},{id:'AM',name:'Aman M',idx:2}];
-// TEAM overridden by People sheet data when loaded via auth
-// CURRENT_USER is now passed in from auth layer as window.__WT_CURRENT_USER
+const TEAM = [{id:'RK',name:'Raj Kumar',idx:0},{id:'PK',name:'Priya K',idx:1},{id:'AM',name:'Aman M',idx:2}];
+// TEAM is overridden inside WorkTrackApp() using p.initialData.people
+// CURRENT_USER is now passed in from auth layer via p.currentUser
 // Labels for the three custom reference fields shown only on Assessment-bucket tasks. Admin-editable.
 const DEFAULT_REF_LABELS = {ref1:'Notice No.', ref2:'AO Order Ref', ref3:'Hearing Ref'};
 const FREQUENCIES = [{id:'none',label:'No recurrence'},{id:'monthly',label:'Monthly'},{id:'quarterly',label:'Quarterly'},{id:'yearly',label:'Yearly'}];
@@ -1295,6 +1293,10 @@ function WorkTrackApp(p){
   // p.currentUser = {id, name, isReviewer, email}
   // p.onDataChange = fn(patch) — called whenever data changes, triggers auto-save
   const CURRENT_USER = p.currentUser ? (p.currentUser.id || p.currentUser.email.split('@')[0].toUpperCase()) : 'RK';
+  // Override TEAM with real people from SharePoint People sheet
+  const TEAM = (p.initialData && p.initialData.people && p.initialData.people.length)
+    ? p.initialData.people.map((person,i)=>({id:person.id,name:person.name,idx:i}))
+    : [{id:'RK',name:'Raj Kumar',idx:0},{id:'PK',name:'Priya K',idx:1},{id:'AM',name:'Aman M',idx:2}];
   const [groups,setGroups]=useState(p.initialData.groups||INIT_GROUPS);
   const [taskDefs,setTaskDefs]=useState(p.initialData.taskDefs||INIT_TASK_DEFS);
   const [clients,setClients]=useState(p.initialData.clients||INIT_CLIENTS);
