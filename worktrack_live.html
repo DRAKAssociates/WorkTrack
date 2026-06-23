@@ -75,9 +75,13 @@ const CONFIG = {
   sharedSitePath:   '/sites/DRAKFiles',
   sharedFileName:   'worktrack_shared.xlsx',
 
-  privateSiteHost:  'drakassociates-my.sharepoint.com',
-  privateUserLogin: 'deepak_drak_co_in',
+  // Private file — now on SharePoint inside the same DRAKFiles site
+  // Folder: Clients/Tracker/WorkTrack/Worktrack Private
+  privateSitePath:  '/sites/DRAKFiles',
+  privateLibraryPath: '/Clients/Tracker/WorkTrack/Worktrack Private',
   privateFileName:  'worktrack_private.xlsx',
+  // OneDrive fallback (no longer needed but kept for safety)
+  privateUserLogin: 'deepak_drak_co_in',
 
   // Reviewer accounts — these users get full MS login + private file access
   // Add the actual email addresses of your reviewer accounts here
@@ -142,41 +146,68 @@ async function graphPut(url, body){
 // Get SharePoint site drive item for a file
 // Resolve files via SharePoint site and personal OneDrive paths
 async function getSharedFileUrl(){
-  // Get site, then default drive, then find file by path
   const site = await graphGet('/sites/drakassociates.sharepoint.com:/sites/DRAKFiles');
   const drive = await graphGet("/sites/"+site.id+"/drive");
-  // Search for the file by name in the drive
+  // Try direct path first (faster and more reliable)
+  try{
+    const item = await graphGet("/drives/"+drive.id+"/root:/Clients/Tracker/WorkTrack/worktrack_shared.xlsx");
+    if(item && item.id) return {driveId: drive.id, itemId: item.id};
+  } catch(_){}
+  // Fallback: search the drive
   const search = await graphGet("/drives/"+drive.id+"/root/search(q='worktrack_shared.xlsx')");
   const file = search.value.find(f=>f.name==='worktrack_shared.xlsx');
-  if(!file) throw new Error('worktrack_shared.xlsx not found in SharePoint drive');
+  if(!file) throw new Error('worktrack_shared.xlsx not found in SharePoint');
   return {driveId: drive.id, itemId: file.id};
 }
 
 async function getPrivateFileUrl(){
-  // Hardcoded file ID from SharePoint share URL
-  // File: worktrack_private.xlsx in deepak_drak_co_in personal OneDrive
-  const PRIVATE_ITEM_ID = "IQBv3WgC-Km4RIApBNBlA8KWAU0ZZh61ZswVqZVm8S2EX3M";
-  try{
-    // Try via personal drive root by encoded share ID
-    // Decode the SharePoint item ID to a standard Graph item ID
-    const drive = await graphGet('/users/deepak_drak_co_in/drive');
-    const search = await graphGet("/users/deepak_drak_co_in/drive/root/search(q='worktrack_private.xlsx')");
-    const file = search.value.find(f=>f.name==='worktrack_private.xlsx');
-    if(file) return {driveId: drive.id, itemId: file.id};
-    throw new Error('Not found via user drive search');
-  } catch(e1){
+  const fname = CONFIG.privateFileName;
+
+  // Strategy 1: SharePoint site library (most reliable — use if you've moved the file there)
+  if(CONFIG.privateSitePath){
     try{
-      // Try via /me/drive with Files.ReadWrite.All scope
-      const drive = await graphGet('/me/drive');
-      const search = await graphGet("/me/drive/root/search(q='worktrack_private.xlsx')");
-      const file = search.value.find(f=>f.name==='worktrack_private.xlsx');
+      const site = await graphGet('/sites/'+CONFIG.sharedSiteHost+':'+CONFIG.privateSitePath);
+      const drive = await graphGet('/sites/'+site.id+'/drive');
+      // Try direct path first
+      const folderPath = (CONFIG.privateLibraryPath||'').replace(/\/$/,'');
+      try{
+        const item = await graphGet('/drives/'+drive.id+'/root:'+folderPath+'/'+fname);
+        if(item && item.id) return {driveId: drive.id, itemId: item.id};
+      } catch(_){}
+      // Fallback: search within the drive
+      const search = await graphGet('/drives/'+drive.id+'/root/search(q=\''+fname+'\')');
+      const file = (search.value||[]).find(f=>f.name===fname);
       if(file) return {driveId: drive.id, itemId: file.id};
-      throw new Error('Not found via me drive search');
-    } catch(e2){
-      console.warn('Private file not accessible, continuing without it:', e2.message);
-      return null;
+    } catch(e1){
+      console.warn('Private file: SharePoint strategy failed', e1.message);
     }
   }
+
+  // Strategy 2: /me/drive search (works when logged-in user owns the file)
+  try{
+    const drive = await graphGet('/me/drive');
+    const search = await graphGet('/me/drive/root/search(q=\''+fname+'\')');
+    const file = (search.value||[]).find(f=>f.name===fname);
+    if(file) return {driveId: drive.id, itemId: file.id};
+  } catch(e2){
+    console.warn('Private file: /me/drive strategy failed', e2.message);
+  }
+
+  // Strategy 3: specific user's OneDrive (requires Files.ReadWrite.All)
+  if(CONFIG.privateUserLogin){
+    try{
+      const userLogin = CONFIG.privateUserLogin.replace(/_/g,'.');
+      const drive = await graphGet('/users/'+userLogin+'/drive');
+      const search = await graphGet('/users/'+userLogin+'/drive/root/search(q=\''+fname+'\')');
+      const file = (search.value||[]).find(f=>f.name===fname);
+      if(file) return {driveId: drive.id, itemId: file.id};
+    } catch(e3){
+      console.warn('Private file: user drive strategy failed', e3.message);
+    }
+  }
+
+  console.warn('Private file not found via any strategy — continuing without it');
+  return null;
 }
 
 
@@ -418,7 +449,7 @@ function App(){
           const pWb = privateWb;
           sheetToWorkbook(pWb,'Assignments',privateAssignRows,ASSIGN_COLS);
           sheetToWorkbook(pWb,'SubTasks',privateSubRows,SUB_COLS);
-          await uploadExcel(pWb, null, privateFileRef.itemId, privateFileRef.userId);
+          await uploadExcel(pWb, privateFileRef.driveId, privateFileRef.itemId, null);
         }
 
         setSaveState('saved');
@@ -1183,8 +1214,43 @@ function ClosingPromptModal(p){
   );
 }
 
+// ---------- Add / Edit Client modal ----------
+function AddClientModal(p){
+  // p.client = existing client (for edit) or null (for new)
+  // p.onSave(name, defaultFreq), p.onClose
+  const [name, setName] = useState(p.client ? p.client.name : '');
+  const [freq, setFreq] = useState(p.client ? (p.client.defaultFreq||'monthly') : 'monthly');
+  const inputStyle={fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
+  const labelStyle={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
+  const handleSave=()=>{ if(!name.trim()) return; p.onSave(name.trim(), freq); p.onClose(); };
+  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1050,padding:20}},
+    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:360,boxShadow:'0 0 0 1px var(--color-border-tertiary)'}},
+      e('div',{style:{fontSize:15,fontWeight:500,color:'var(--color-text-primary)',marginBottom:14}},p.client?'Edit client':'Add client'),
+      e('div',{style:{marginBottom:12}},
+        e('label',{style:labelStyle},'Client name'),
+        e('input',{style:inputStyle,placeholder:'e.g. Sharma & Sons',value:name,autoFocus:true,
+          onChange:ev=>setName(ev.target.value),
+          onKeyDown:ev=>{if(ev.key==='Enter') handleSave(); if(ev.key==='Escape') p.onClose();}})
+      ),
+      e('div',{style:{marginBottom:20}},
+        e('label',{style:labelStyle},'Default recurrence'),
+        e('select',{style:inputStyle,value:freq,onChange:ev=>setFreq(ev.target.value)},
+          FREQUENCIES.map(f=>e('option',{key:f.id,value:f.id},f.label))
+        ),
+        e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginTop:4}},'Used as default when creating recurring tasks for this client. Can be overridden per task.')
+      ),
+      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
+        e(Btn,{onClick:p.onClose},'Cancel'),
+        e(Btn,{pri:true,onClick:handleSave},p.client?'Save changes':'Add client')
+      )
+    )
+  );
+}
+
 // ---------- Add Task modal ----------
 function AddTaskModal(p){
+  // p.team = real team from People sheet (passed from WorkTrackApp)
+  const modalTeam = (p.team && p.team.length) ? p.team : [{id:'RK',name:'Raj Kumar',idx:0},{id:'PK',name:'Priya K',idx:1},{id:'AM',name:'Aman M',idx:2}];
   const [mode,setMode]=useState('assign');
   const [taskTypeId,setTaskTypeId]=useState(p.taskDefs[0]?.id||'');
   const [newLabel,setNewLabel]=useState('');
@@ -1204,8 +1270,8 @@ function AddTaskModal(p){
     else setPeriod(String(yr));
   };
   const [due,setDue]=useState('');
-  const [prep,setPrep]=useState('PK');
-  const [rev,setRev]=useState('RK');
+  const [prep,setPrep]=useState(modalTeam[0]?.id||'');
+  const [rev,setRev]=useState(modalTeam[0]?.id||'');
   const [freq,setFreq]=useState('none');
   const [newIsCompliance,setNewIsCompliance]=useState(false);
 
@@ -1228,14 +1294,16 @@ function AddTaskModal(p){
       const newId='custom_'+uid();
       p.onCreateTaskType({id:newId,label:newLabel.trim(),group:newGroup,bucket:newBucket,isCompliance:newIsCompliance});
       if(due){
+        const pIdx=modalTeam.findIndex(t=>t.id===prep); const rIdx=modalTeam.findIndex(t=>t.id===rev);
         p.onAddAssignment({id:uid(),tid:newId,cid:finalClientId,period:finalPeriod,due,prep,rev,
-          pi:TEAM.find(t=>t.id===prep).idx,ri:TEAM.find(t=>t.id===rev).idx,
+          pi:pIdx>=0?pIdx:0,ri:rIdx>=0?rIdx:0,
           status:'pending',od:false,freq:finalClientId?freq:'none',st:[]});
       }
     } else {
       if(!taskTypeId||!due) return;
+      const pIdx=modalTeam.findIndex(t=>t.id===prep); const rIdx=modalTeam.findIndex(t=>t.id===rev);
       p.onAddAssignment({id:uid(),tid:taskTypeId,cid:finalClientId,period:finalPeriod,due,prep,rev,
-        pi:TEAM.find(t=>t.id===prep).idx,ri:TEAM.find(t=>t.id===rev).idx,
+        pi:pIdx>=0?pIdx:0,ri:rIdx>=0?rIdx:0,
         status:'pending',od:false,freq:finalClientId?freq:'none',st:[]});
     }
     p.onClose();
@@ -1278,7 +1346,14 @@ function AddTaskModal(p){
           e('label',{style:{fontSize:10,color:'var(--color-text-tertiary)',display:'flex',alignItems:'center',gap:4,cursor:'pointer'}},
             e('input',{type:'checkbox',checked:noClient,onChange:ev=>setNoClient(ev.target.checked),style:{margin:0}}),'Internal / non-client task')
         ),
-        !noClient ? e('select',{style:inputStyle,value:clientId,onChange:ev=>setClientId(ev.target.value)},p.clients.map(c=>e('option',{key:c.id,value:c.id},c.name))) : null
+        !noClient ? e(CreatableSelect,{
+          value:clientId,
+          options:p.clients.map(c=>({id:c.id,label:c.name})),
+          newLabel:'client',
+          placeholder:'e.g. Patel & Co',
+          onChange:setClientId,
+          onCreate:name=>{const c=p.onAddClient(name,'monthly'); if(c) setClientId(c.id);}
+        }) : null
       ),
 
       e('div',{style:fieldWrap},
@@ -1312,9 +1387,9 @@ function AddTaskModal(p){
 
       e('div',{style:{display:'flex',gap:10,marginBottom:12}},
         e('div',{style:{flex:1}},e('label',{style:labelStyle},'Preparer'),
-          e('select',{style:inputStyle,value:prep,onChange:ev=>setPrep(ev.target.value)},TEAM.map(t=>e('option',{key:t.id,value:t.id},t.name)))),
+          e('select',{style:inputStyle,value:prep,onChange:ev=>setPrep(ev.target.value)},modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))),
         e('div',{style:{flex:1}},e('label',{style:labelStyle},'Reviewer'),
-          e('select',{style:inputStyle,value:rev,onChange:ev=>setRev(ev.target.value)},TEAM.map(t=>e('option',{key:t.id,value:t.id},t.name))))
+          e('select',{style:inputStyle,value:rev,onChange:ev=>setRev(ev.target.value)},modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name))))
       ),
 
       !noClient ? e('div',{style:{marginBottom:18}},
@@ -1360,6 +1435,8 @@ function WorkTrackApp(p){
   const [clientFilter,setClientFilter]=useState('all');
   const [teamFilter,setTeamFilter]=useState({...BLANK_FILTER});
   const [showAddModal,setShowAddModal]=useState(false);
+  const [showAddClientModal,setShowAddClientModal]=useState(false);
+  const [editingClient,setEditingClient]=useState(null); // null=adding new, obj=editing existing
   const [nextOccurDraft,setNextOccurDraft]=useState(null); // {row, period, due}
   const [bulkCreateTask,setBulkCreateTask]=useState(null); // taskDef or null
   const [showExcelModal,setShowExcelModal]=useState(false);
@@ -1512,10 +1589,21 @@ function WorkTrackApp(p){
   const handleCreateGroup=label=>{
     const id='grp_'+uid();
     const g={id,label};
-    setGroups(prev=>[...prev,g]);
+    setGroups(wrapGroups(prev=>[...prev,g]));
     return g;
   };
-  const updateClientFreq=(cid,freq)=>setClients(prev=>prev.map(c=>c.id===cid?{...c,defaultFreq:freq}:c));
+  const handleAddClient=(name, defaultFreq)=>{
+    const id='cl_'+uid();
+    const c={id, name:name.trim(), defaultFreq:defaultFreq||'monthly'};
+    setClients(wrapClients(prev=>[...prev,c]));
+    return c;
+  };
+  const handleRenameClient=(cid, name)=>setClients(wrapClients(prev=>prev.map(c=>c.id===cid?{...c,name:name.trim()}:c)));
+  const handleDeleteClient=(cid)=>{
+    if(ct.some(r=>r.cid===cid)) return alert('Cannot delete client with existing tasks. Remove all tasks first.');
+    setClients(wrapClients(prev=>prev.filter(c=>c.id!==cid)));
+  };
+  const updateClientFreq=(cid,freq)=>setClients(wrapClients(prev=>prev.map(c=>c.id===cid?{...c,defaultFreq:freq}:c)));
 
   const startNextOccurrence=row=>{
     const np=nextPeriod(row.period,row.freq);
@@ -1800,8 +1888,10 @@ function WorkTrackApp(p){
       focusClient?e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:10}},
         e('button',{onClick:()=>{setFocusClient(null);setExpCC(null);},style:{fontSize:11,padding:'4px 10px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'transparent',color:'var(--color-text-secondary)',cursor:'pointer'}},'← All clients'),
         e('span',{style:{fontSize:13,fontWeight:500,color:'var(--color-text-primary)'}},(clients.find(c=>c.id===focusClient)||{}).name)
-      ):null,
-      e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:10}},'Each task type below keeps its own period default (set on the Dashboard, or overridden here). Expand a client, then a task, to adjust its filter or view subtasks.'),
+      ):e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}},
+        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Expand a client to see their tasks. Double-click a client name inside a task to jump here.'),
+        e(Btn,{pri:true,onClick:()=>{setEditingClient(null);setShowAddClientModal(true);}},e('i',{className:'ti ti-plus','aria-hidden':'true'}),'Add client')
+      ),
       list.map((cl,ci)=>{
         const myRowsAll=ct.filter(x=>x.cid===cl.id);
         if(!myRowsAll.length && !focusClient) return null;
@@ -1819,13 +1909,17 @@ function WorkTrackApp(p){
         const done=visibleRows.filter(x=>x.status==='done').length;
         const pending=visibleRows.filter(x=>x.status==='pending'||x.status==='review').length;
         return e('div',{key:cl.id,style:{border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',marginBottom:6,background:'var(--color-background-primary)'}},
-          e('div',{onClick:()=>setExpCC(isOpen?null:cl.id),style:{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',cursor:'pointer',borderBottom:isOpen?'0.5px solid var(--color-border-tertiary)':'none',flexWrap:'wrap',rowGap:6}},
-            e(Av,{idx:ci,label:initials(cl.name),size:26}),
-            e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:'var(--color-text-primary)',minWidth:100}},cl.name),
-            e(Pill,{k:'t'},visibleRows.length+' tasks'),
-            done>0?e(Pill,{k:'d'},done+' done'):null,
-            pending>0?e(Pill,{k:'p'},pending+' pending'):null,
-            e('span',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginLeft:6}},isOpen?'▲':'▼')
+          e('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',borderBottom:isOpen?'0.5px solid var(--color-border-tertiary)':'none',flexWrap:'wrap',rowGap:6}},
+            e('div',{onClick:()=>setExpCC(isOpen?null:cl.id),style:{display:'flex',alignItems:'center',gap:8,flex:1,cursor:'pointer',flexWrap:'wrap',rowGap:6}},
+              e(Av,{idx:ci,label:initials(cl.name),size:26}),
+              e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:'var(--color-text-primary)',minWidth:100}},cl.name),
+              e(Pill,{k:'t'},visibleRows.length+' tasks'),
+              done>0?e(Pill,{k:'d'},done+' done'):null,
+              pending>0?e(Pill,{k:'p'},pending+' pending'):null,
+              e('span',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginLeft:6}},isOpen?'▲':'▼')
+            ),
+            e('button',{onClick:ev=>{ev.stopPropagation();setEditingClient(cl);setShowAddClientModal(true);},title:'Edit client',style:{fontSize:10,padding:'3px 8px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'transparent',color:'var(--color-text-tertiary)',cursor:'pointer'}},e('i',{className:'ti ti-pencil','aria-hidden':'true'})),
+            e('button',{onClick:ev=>{ev.stopPropagation();if(confirm('Delete '+cl.name+'? This cannot be undone.')) handleDeleteClient(cl.id);},title:'Delete client',style:{fontSize:10,padding:'3px 8px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'transparent',color:'#993C1D',cursor:'pointer'}},e('i',{className:'ti ti-trash','aria-hidden':'true'}))
           ),
           isOpen ? e('div',null,
             tidsForClient.length===0 ? e('div',{style:{padding:24,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No tasks.') :
@@ -2207,11 +2301,20 @@ function WorkTrackApp(p){
 
   return e(React.Fragment,null,
   showAddModal ? e(AddTaskModal,{
-    taskDefs,clients,groups,ct,
+    taskDefs,clients,groups,ct,team:TEAM,
     onClose:()=>setShowAddModal(false),
     onCreateTaskType:handleCreateTaskType,
     onAddAssignment:handleAddAssignment,
-    onCreateGroup:handleCreateGroup
+    onCreateGroup:handleCreateGroup,
+    onAddClient:handleAddClient,
+  }) : null,
+  showAddClientModal ? e(AddClientModal,{
+    client:editingClient,
+    onSave:(name,freq)=>{
+      if(editingClient){ handleRenameClient(editingClient.id, name); updateClientFreq(editingClient.id, freq); }
+      else { handleAddClient(name, freq); }
+    },
+    onClose:()=>{ setShowAddClientModal(false); setEditingClient(null); }
   }) : null,
   bulkCreateTask ? e(BulkCreateModal,{
     taskDef:bulkCreateTask,
