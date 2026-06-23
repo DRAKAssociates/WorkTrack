@@ -140,29 +140,24 @@ async function graphPut(url, body){
 
 // ── Excel read/write via Graph API ───────────────────────────
 // Get SharePoint site drive item for a file
+// Use Graph /shares endpoint — resolves any SharePoint sharing URL directly
+const SHARED_SHARE_TOKEN = "u!aHR0cHM6Ly9kcmFrYXNzb2NpYXRlcy5zaGFyZXBvaW50LmNvbS86eDovcy9EUkFLRmlsZXMvSVFCVU1wWTBqRjBvUUtqVmhWUmVET2pXQWFuMjVxbGdvZ3dKdWZEQ2FRdk53R2c_ZT1lUWtjTkQ";
+const PRIVATE_SHARE_TOKEN = "u!aHR0cHM6Ly9kcmFrYXNzb2NpYXRlcy1teS5zaGFyZXBvaW50LmNvbS86eDovZy9wZXJzb25hbC9kZWVwYWtfZHJha19jb19pbi9JUUJ2M1dnQy1LbTRSSUFwQk5CbEE4S1dBVTBaWmg2MVpzd1ZxWlZtOFMyRVgzTT9lPXhvSHpjUw";
+
 async function getSharedFileUrl(){
-  // Get the drive ID for the SharePoint site
-  const site = await graphGet(`/sites/${CONFIG.sharedSiteHost}:${CONFIG.sharedSitePath}`);
-  const drives = await graphGet(`/sites/${site.id}/drives`);
-  const drive = drives.value[0];
-  const items = await graphGet(`/drives/${drive.id}/root/search(q='${CONFIG.sharedFileName}')`);
-  const file = items.value.find(i=>i.name===CONFIG.sharedFileName);
-  if(!file) throw new Error('Shared file not found');
-  return {driveId: drive.id, itemId: file.id};
+  const item = await graphGet(`/shares/${SHARED_SHARE_TOKEN}/driveItem`);
+  return {driveId: item.parentReference.driveId, itemId: item.id};
 }
 
 async function getPrivateFileUrl(){
-  const resp = await graphGet(`/users/${CONFIG.privateUserLogin}/drive/root/search(q='${CONFIG.privateFileName}')`);
-  const file = resp.value.find(i=>i.name===CONFIG.privateFileName);
-  if(!file) throw new Error('Private file not found');
-  return {driveId: null, userId: CONFIG.privateUserLogin, itemId: file.id};
+  const item = await graphGet(`/shares/${PRIVATE_SHARE_TOKEN}/driveItem`);
+  return {driveId: item.parentReference.driveId, itemId: item.id};
 }
 
 async function downloadExcel(driveId, itemId, userId){
   const token = await getToken();
-  const url = driveId
-    ? `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`
-    : `https://graph.microsoft.com/v1.0/users/${userId}/drive/items/${itemId}/content`;
+  // Always use driveId/itemId now (both shared and private resolved via /shares)
+  const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`;
   const resp = await fetch(url,{headers:{Authorization:'Bearer '+token}});
   if(!resp.ok) throw new Error('Download failed '+resp.status);
   const buffer = await resp.arrayBuffer();
@@ -171,10 +166,8 @@ async function downloadExcel(driveId, itemId, userId){
 
 async function uploadExcel(wb, driveId, itemId, userId){
   const buffer = XLSX.write(wb,{type:'array',bookType:'xlsx'});
-  const url = driveId
-    ? `/drives/${driveId}/items/${itemId}/content`
-    : `/users/${userId}/drive/items/${itemId}/content`;
-  await graphPut(url, buffer);
+  // Always use driveId/itemId now
+  await graphPut(`/drives/${driveId}/items/${itemId}/content`, buffer);
 }
 
 // ── Parse Excel sheets into app data structures ───────────────
