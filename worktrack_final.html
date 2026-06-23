@@ -1,0 +1,2233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkTrack — DRAK Associates</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
+<style>
+  :root{
+    --color-background-primary:#ffffff;
+    --color-background-secondary:#F4F3EF;
+    --color-background-tertiary:#EDEBE4;
+    --color-text-primary:#1A1A18;
+    --color-text-secondary:#5F5E5A;
+    --color-text-tertiary:#8C8B86;
+    --color-border-tertiary:rgba(0,0,0,0.10);
+    --color-border-secondary:rgba(0,0,0,0.20);
+    --border-radius-md:8px;
+    --border-radius-lg:12px;
+    --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:0;font-family:var(--font-sans);background:var(--color-background-tertiary)}
+  select,input{font-family:var(--font-sans)}
+
+  /* Login screen */
+  .login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:20px}
+  .login-card{background:var(--color-background-primary);border-radius:var(--border-radius-lg);padding:40px 48px;text-align:center;box-shadow:0 2px 20px rgba(0,0,0,0.08);width:360px}
+  .login-logo{font-size:28px;font-weight:600;color:#534AB7;margin-bottom:4px}
+  .login-sub{font-size:13px;color:var(--color-text-tertiary);margin-bottom:28px}
+  .login-btn{width:100%;padding:11px;background:#534AB7;color:#fff;border:none;border-radius:var(--border-radius-md);font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+  .login-btn:hover{background:#3C3489}
+  .login-btn.secondary{background:transparent;color:#534AB7;border:0.5px solid #534AB7}
+  .login-btn.secondary:hover{background:#EEEDFE}
+  .login-divider{font-size:11px;color:var(--color-text-tertiary);margin:8px 0}
+
+  /* Preparer picker */
+  .picker-list{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+  .picker-item{padding:10px 14px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);cursor:pointer;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--color-text-primary);background:var(--color-background-primary)}
+  .picker-item:hover{border-color:#534AB7;background:#EEEDFE;color:#534AB7}
+  .picker-avatar{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;color:#fff;flex-shrink:0}
+
+  /* Loading */
+  .loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:12px}
+  .spinner{width:32px;height:32px;border:3px solid #EEEDFE;border-top-color:#534AB7;border-radius:50%;animation:spin 0.8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading-text{font-size:13px;color:var(--color-text-tertiary)}
+
+  /* Save indicator */
+  .save-indicator{position:fixed;bottom:16px;right:16px;background:#534AB7;color:#fff;font-size:11px;padding:6px 12px;border-radius:20px;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:2000}
+  .save-indicator.visible{opacity:1}
+  .save-indicator.error{background:#993C1D}
+
+  /* App wrapper */
+  .app-wrap{padding:16px;min-height:100vh}
+</style>
+</head>
+<body>
+<div id="wt-root"></div>
+
+<script>
+// ============================================================
+// CONFIGURATION — PASTE YOUR VALUES HERE
+// ============================================================
+const CONFIG = {
+  clientId:    '49a9b4aa-8c5f-4e6c-a19e-489d07eb871e',
+  tenantId:    '1105ca24-cc2c-410a-ad78-13c118913bc2',
+
+  // SharePoint details (extracted from your file URLs)
+  sharedSiteHost:   'drakassociates.sharepoint.com',
+  sharedSitePath:   '/sites/DRAKFiles',
+  sharedFileName:   'worktrack_shared.xlsx',
+
+  privateSiteHost:  'drakassociates-my.sharepoint.com',
+  privateUserLogin: 'deepak_drak_co_in',
+  privateFileName:  'worktrack_private.xlsx',
+
+  // Reviewer accounts — these users get full MS login + private file access
+  // Add the actual email addresses of your reviewer accounts here
+  reviewerEmails: [
+    'deepak@drak.co.in',       // REPLACE with your actual reviewer email
+    'amruta@drak.co.in',    // REPLACE with second reviewer email (or remove if only 1)
+  ],
+
+  orgName: 'DRAK Associates',
+};
+// ============================================================
+
+const AVC = ['#534AB7','#0F6E56','#993C1D','#185FA5','#854F0B'];
+
+// ── MSAL Auth setup ──────────────────────────────────────────
+const msalConfig = {
+  auth: {
+    clientId: CONFIG.clientId,
+    authority: `https://login.microsoftonline.com/drakassociates.onmicrosoft.com`,
+    redirectUri: window.location.href.split('?')[0],
+  },
+  cache: { cacheLocation: 'sessionStorage' }
+};
+
+const msalInstance = new msal.PublicClientApplication(msalConfig);
+const SCOPES = ['User.Read','Files.ReadWrite','Sites.ReadWrite.All'];
+
+// ── SharePoint Graph API helpers ─────────────────────────────
+async function getToken(){
+  const accounts = msalInstance.getAllAccounts();
+  if(!accounts.length) throw new Error('Not signed in');
+  try{
+    const resp = await msalInstance.acquireTokenSilent({scopes:SCOPES, account:accounts[0]});
+    return resp.accessToken;
+  } catch(e){
+    const resp = await msalInstance.acquireTokenPopup({scopes:SCOPES});
+    return resp.accessToken;
+  }
+}
+
+async function graphGet(url){
+  const token = await getToken();
+  const resp = await fetch('https://graph.microsoft.com/v1.0'+url,{
+    headers:{Authorization:'Bearer '+token}
+  });
+  if(!resp.ok) throw new Error('Graph GET failed: '+url+' '+resp.status);
+  return resp.json();
+}
+
+async function graphPut(url, body){
+  const token = await getToken();
+  const resp = await fetch('https://graph.microsoft.com/v1.0'+url,{
+    method:'PUT',
+    headers:{Authorization:'Bearer '+token,'Content-Type':'application/octet-stream'},
+    body
+  });
+  if(!resp.ok) throw new Error('Graph PUT failed: '+url+' '+resp.status);
+  return resp;
+}
+
+// ── Excel read/write via Graph API ───────────────────────────
+// Get SharePoint site drive item for a file
+async function getSharedFileUrl(){
+  // Get the drive ID for the SharePoint site
+  const site = await graphGet(`/sites/${CONFIG.sharedSiteHost}:${CONFIG.sharedSitePath}`);
+  const drives = await graphGet(`/sites/${site.id}/drives`);
+  const drive = drives.value[0];
+  const items = await graphGet(`/drives/${drive.id}/root/search(q='${CONFIG.sharedFileName}')`);
+  const file = items.value.find(i=>i.name===CONFIG.sharedFileName);
+  if(!file) throw new Error('Shared file not found');
+  return {driveId: drive.id, itemId: file.id};
+}
+
+async function getPrivateFileUrl(){
+  const resp = await graphGet(`/users/${CONFIG.privateUserLogin}/drive/root/search(q='${CONFIG.privateFileName}')`);
+  const file = resp.value.find(i=>i.name===CONFIG.privateFileName);
+  if(!file) throw new Error('Private file not found');
+  return {driveId: null, userId: CONFIG.privateUserLogin, itemId: file.id};
+}
+
+async function downloadExcel(driveId, itemId, userId){
+  const token = await getToken();
+  const url = driveId
+    ? `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`
+    : `https://graph.microsoft.com/v1.0/users/${userId}/drive/items/${itemId}/content`;
+  const resp = await fetch(url,{headers:{Authorization:'Bearer '+token}});
+  if(!resp.ok) throw new Error('Download failed '+resp.status);
+  const buffer = await resp.arrayBuffer();
+  return XLSX.read(buffer,{type:'array'});
+}
+
+async function uploadExcel(wb, driveId, itemId, userId){
+  const buffer = XLSX.write(wb,{type:'array',bookType:'xlsx'});
+  const url = driveId
+    ? `/drives/${driveId}/items/${itemId}/content`
+    : `/users/${userId}/drive/items/${itemId}/content`;
+  await graphPut(url, buffer);
+}
+
+// ── Parse Excel sheets into app data structures ───────────────
+function parseSheet(wb, sheetName){
+  const ws = wb.Sheets[sheetName];
+  if(!ws) return [];
+  return XLSX.utils.sheet_to_json(ws,{defval:''});
+}
+
+function sheetToWorkbook(wb, sheetName, rows, columns){
+  const ws = XLSX.utils.json_to_sheet(rows,{header:columns});
+  ws['!cols'] = columns.map(c=>({wch:Math.max(12,c.length+2)}));
+  wb.Sheets[sheetName] = ws;
+  if(!wb.SheetNames.includes(sheetName)) wb.SheetNames.push(sheetName);
+}
+
+function rowsToApp(sharedWb, privateWb, isReviewer){
+  const clients = parseSheet(sharedWb,'Clients').map(r=>({id:r.ID,name:r.Name,defaultFreq:r.DefaultFreq||'none'}));
+  const taskDefs = parseSheet(sharedWb,'TaskTypes').map(r=>({id:r.ID,label:r.Label,group:r.Group,bucket:r.Bucket,isCompliance:r.IsCompliance==='true'||r.IsCompliance===true||r.IsCompliance==='TRUE'}));
+  const groups = [...new Set(taskDefs.map(t=>t.group))].map(g=>({id:g,label:g}));
+  const people = parseSheet(sharedWb,'People').map(r=>({id:r.ID,name:r.Name,role:r.Role,accountType:r.AccountType}));
+  const settings = {};
+  parseSheet(sharedWb,'Settings').forEach(r=>{settings[r.Key]=r.Value;});
+
+  const refLabels = {
+    ref1: settings.RefLabel1||'Reference 1',
+    ref2: settings.RefLabel2||'Reference 2',
+    ref3: settings.RefLabel3||'Reference 3',
+  };
+
+  const parseAssignments = (wb, isPrivate) => {
+    const rows = parseSheet(wb,'Assignments');
+    const subs = parseSheet(wb,'SubTasks');
+    return rows.map(r=>({
+      id:r.ID, tid:r.TaskTypeID, cid:r.ClientID||null,
+      period:r.Period||null, due:r.DueDate||'', prep:r.Preparer||'', rev:r.Reviewer||'',
+      pi:0, ri:0, status:r.Status||'pending', freq:r.Frequency||'none',
+      filedDate:r.FiledDate||undefined, ackNo:r.AckNumber||undefined,
+      fy:r.FY||undefined, ref1:r.Ref1||undefined, ref2:r.Ref2||undefined, ref3:r.Ref3||undefined,
+      closedWithoutReview:r.ClosedWithoutApproval==='true'||r.ClosedWithoutApproval===true,
+      resignNote:r.ResignNote||undefined,
+      isPrivate: !!isPrivate,
+      st: subs.filter(s=>s.AssignmentID===r.ID).map(s=>({id:s.ID,t:s.Text,d:s.Done==='true'||s.Done===true}))
+    }));
+  };
+
+  const sharedAssignments = parseAssignments(sharedWb, false);
+  const privateAssignments = isReviewer ? parseAssignments(privateWb, true) : [];
+  const allAssignments = [...sharedAssignments, ...privateAssignments];
+
+  // Resolve avatar indices
+  const teamMap = {};
+  people.forEach((p,i)=>{ teamMap[p.id]=i; });
+  allAssignments.forEach(r=>{
+    r.pi = teamMap[r.prep]??0;
+    r.ri = teamMap[r.rev]??0;
+  });
+
+  return {clients, taskDefs, groups, people, settings, refLabels, ct: allAssignments};
+}
+
+function appToRows(ct, taskDefs, isReviewer){
+  const ASSIGN_COLS = ['ID','TaskTypeID','ClientID','Period','DueDate','Preparer','Reviewer',
+    'Status','Frequency','FiledDate','AckNumber','FY','Ref1','Ref2','Ref3','ClosedWithoutApproval','ResignNote'];
+  const SUB_COLS = ['ID','AssignmentID','Text','Done'];
+
+  const toAssignRow = r => ({
+    ID:r.id, TaskTypeID:r.tid, ClientID:r.cid||'', Period:r.period||'', DueDate:r.due,
+    Preparer:r.prep, Reviewer:r.rev, Status:r.status, Frequency:r.freq,
+    FiledDate:r.filedDate||'', AckNumber:r.ackNo||'', FY:r.fy||'',
+    Ref1:r.ref1||'', Ref2:r.ref2||'', Ref3:r.ref3||'',
+    ClosedWithoutApproval:r.closedWithoutReview?'true':'false',
+    ResignNote:r.resignNote||''
+  });
+  const toSubRows = r => r.st.map(s=>({ID:s.id, AssignmentID:r.id, Text:s.t, Done:s.d?'true':'false'}));
+
+  const sharedRows = ct.filter(r=>!r.isPrivate);
+  const privateRows = ct.filter(r=>r.isPrivate);
+
+  const sharedAssignRows = sharedRows.map(toAssignRow);
+  const sharedSubRows = sharedRows.flatMap(toSubRows);
+  const privateAssignRows = privateRows.map(toAssignRow);
+  const privateSubRows = privateRows.flatMap(toSubRows);
+
+  return {sharedAssignRows, sharedSubRows, privateAssignRows, privateSubRows, ASSIGN_COLS, SUB_COLS};
+}
+
+// ── Main React App ────────────────────────────────────────────
+(function(){
+function boot(){
+const e = React.createElement;
+const useState = React.useState;
+const useEffect = React.useEffect;
+const useRef = React.useRef;
+
+function App(){
+  const [phase, setPhase] = useState('init'); // init|login|preparer-pick|loading|app|error
+  const [currentUser, setCurrentUser] = useState(null); // {id, name, role, isReviewer, email}
+  const [appData, setAppData] = useState(null);
+  const [sharedFileRef, setSharedFileRef] = useState(null);
+  const [privateFileRef, setPrivateFileRef] = useState(null);
+  const [sharedWb, setSharedWb] = useState(null);
+  const [privateWb, setPrivateWb] = useState(null);
+  const [saveState, setSaveState] = useState('idle'); // idle|saving|saved|error
+  const saveTimer = useRef(null);
+  const pendingSave = useRef(false);
+
+  useEffect(()=>{
+    msalInstance.initialize().then(()=>{
+      // Handle redirect after login
+      msalInstance.handleRedirectPromise().then(resp=>{
+        if(resp && resp.account){
+          handleMsalLogin(resp.account, resp.accessToken);
+        } else {
+          const accounts = msalInstance.getAllAccounts();
+          if(accounts.length){
+            handleMsalLogin(accounts[0], null);
+          } else {
+            setPhase('login');
+          }
+        }
+      }).catch(()=>setPhase('login'));
+    });
+  },[]);
+
+  const handleMsalLogin = async (account, token) => {
+    setPhase('loading');
+    try{
+      const email = account.username;
+      const isReviewer = CONFIG.reviewerEmails.some(r=>r.toLowerCase()===email.toLowerCase());
+      const displayName = account.name||email;
+
+      // Find this person in People sheet or create entry
+      setCurrentUser({
+        id: isReviewer ? email.split('@')[0].toUpperCase() : null,
+        name: displayName,
+        email,
+        isReviewer,
+        role: isReviewer ? 'reviewer' : 'preparer'
+      });
+
+      await loadData(isReviewer);
+    } catch(err){
+      console.error(err);
+      setPhase('error');
+    }
+  };
+
+  const signInWithMicrosoft = async () => {
+    try{
+      await msalInstance.loginPopup({scopes:SCOPES});
+      const accounts = msalInstance.getAllAccounts();
+      if(accounts.length) await handleMsalLogin(accounts[0], null);
+    } catch(e){ console.error(e); }
+  };
+
+  const loadData = async (isReviewer) => {
+    setPhase('loading');
+    try{
+      // Load shared file
+      const sharedRef = await getSharedFileUrl();
+      setSharedFileRef(sharedRef);
+      const sWb = await downloadExcel(sharedRef.driveId, sharedRef.itemId, null);
+      setSharedWb(sWb);
+
+      let pWb = null;
+      let privateRef = null;
+      if(isReviewer){
+        try{
+          privateRef = await getPrivateFileUrl();
+          setPrivateFileRef(privateRef);
+          pWb = await downloadExcel(null, privateRef.itemId, privateRef.userId);
+          setPrivateWb(pWb);
+        } catch(e){ console.warn('Private file not found, skipping',e); }
+      }
+
+      const data = rowsToApp(sWb, pWb||{Sheets:{},SheetNames:[]}, isReviewer);
+      setAppData(data);
+
+      // If reviewer, go straight to app. If preparer account, show picker.
+      if(isReviewer){
+        setPhase('app');
+      } else {
+        setPhase('preparer-pick');
+      }
+    } catch(err){
+      console.error('Load error:', err);
+      setPhase('error');
+    }
+  };
+
+  const pickPreparer = (person) => {
+    setCurrentUser(prev=>({...prev, id:person.id, name:person.name, role:'preparer'}));
+    setPhase('app');
+  };
+
+  // Auto-save whenever ct changes — debounced 3 seconds
+  const triggerSave = async (newCt, newAppData) => {
+    if(saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async ()=>{
+      setSaveState('saving');
+      try{
+        const data = newAppData || appData;
+        const {sharedAssignRows, sharedSubRows, privateAssignRows, privateSubRows, ASSIGN_COLS, SUB_COLS} = appToRows(newCt||data.ct, data.taskDefs, currentUser?.isReviewer);
+
+        // Write shared workbook
+        const sWb = sharedWb || XLSX.read('',{type:'string'});
+        sheetToWorkbook(sWb,'Assignments',sharedAssignRows,ASSIGN_COLS);
+        sheetToWorkbook(sWb,'SubTasks',sharedSubRows,SUB_COLS);
+
+        // Write clients, taskTypes, people back too
+        sheetToWorkbook(sWb,'Clients',data.clients.map(c=>({ID:c.id,Name:c.name,DefaultFreq:c.defaultFreq})),['ID','Name','DefaultFreq']);
+        sheetToWorkbook(sWb,'TaskTypes',data.taskDefs.map(t=>({ID:t.id,Label:t.label,Group:t.group,Bucket:t.bucket,IsCompliance:t.isCompliance?'true':'false'})),['ID','Label','Group','Bucket','IsCompliance']);
+        sheetToWorkbook(sWb,'People',data.people.map(p=>({ID:p.id,Name:p.name,Role:p.role,AccountType:p.accountType})),['ID','Name','Role','AccountType']);
+
+        await uploadExcel(sWb, sharedFileRef?.driveId, sharedFileRef?.itemId, null);
+
+        // Write private workbook if reviewer
+        if(currentUser?.isReviewer && privateWb && privateFileRef){
+          const pWb = privateWb;
+          sheetToWorkbook(pWb,'Assignments',privateAssignRows,ASSIGN_COLS);
+          sheetToWorkbook(pWb,'SubTasks',privateSubRows,SUB_COLS);
+          await uploadExcel(pWb, null, privateFileRef.itemId, privateFileRef.userId);
+        }
+
+        setSaveState('saved');
+        setTimeout(()=>setSaveState('idle'),2000);
+      } catch(err){
+        console.error('Save error:',err);
+        setSaveState('error');
+        setTimeout(()=>setSaveState('idle'),3000);
+      }
+    },3000);
+  };
+
+  const updateData = (patch) => {
+    setAppData(prev=>{
+      const next = {...prev,...patch};
+      triggerSave(next.ct, next);
+      return next;
+    });
+  };
+
+  // ── Login screen ─────────────────────────────────────────
+  if(phase==='login'){
+    return e('div',{className:'login-screen'},
+      e('div',{className:'login-card'},
+        e('div',{className:'login-logo'},'WorkTrack'),
+        e('div',{className:'login-sub'},CONFIG.orgName),
+        e('button',{className:'login-btn',onClick:signInWithMicrosoft},
+          e('i',{className:'ti ti-brand-microsoft','aria-hidden':'true'}),
+          'Sign in with Microsoft'
+        ),
+        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginTop:8}},'Use your '+CONFIG.orgName+' Microsoft account')
+      )
+    );
+  }
+
+  // ── Preparer picker ───────────────────────────────────────
+  if(phase==='preparer-pick'){
+    const preparers = (appData?.people||[]).filter(p=>p.role==='preparer');
+    return e('div',{className:'login-screen'},
+      e('div',{className:'login-card'},
+        e('div',{className:'login-logo'},'WorkTrack'),
+        e('div',{className:'login-sub'},'Who are you today?'),
+        e('div',{className:'picker-list'},
+          preparers.map((p,i)=>e('div',{key:p.id,className:'picker-item',onClick:()=>pickPreparer(p)},
+            e('div',{className:'picker-avatar',style:{background:AVC[i%5]}},p.name.slice(0,2).toUpperCase()),
+            p.name
+          ))
+        )
+      )
+    );
+  }
+
+  // ── Loading ───────────────────────────────────────────────
+  if(phase==='loading'||phase==='init'){
+    return e('div',{className:'loading-screen'},
+      e('div',{className:'spinner'}),
+      e('div',{className:'loading-text'},phase==='init'?'Starting up…':'Loading your data from SharePoint…')
+    );
+  }
+
+  // ── Error ─────────────────────────────────────────────────
+  if(phase==='error'){
+    return e('div',{className:'loading-screen'},
+      e('div',{style:{fontSize:32,marginBottom:8}},'⚠️'),
+      e('div',{style:{fontSize:14,color:'var(--color-text-primary)',marginBottom:4}},'Could not connect to SharePoint'),
+      e('div',{style:{fontSize:12,color:'var(--color-text-tertiary)',marginBottom:16,textAlign:'center',maxWidth:300}},'Check that your Client ID and Tenant ID are correctly pasted in the CONFIG section at the top of this file, and that you have internet access.'),
+      e('button',{onClick:()=>setPhase('login'),style:{padding:'8px 16px',background:'#534AB7',color:'#fff',border:'none',borderRadius:'var(--border-radius-md)',cursor:'pointer',fontSize:13}},'Try again')
+    );
+  }
+
+  // ── Main app ──────────────────────────────────────────────
+  if(phase==='app' && appData){
+    return e(React.Fragment,null,
+      e(SaveIndicator,{state:saveState}),
+      e(WorkTrackApp,{
+        initialData:appData,
+        currentUser,
+        onDataChange:(patch)=>{
+          // Update local appData and trigger save to SharePoint
+          setAppData(prev=>({...prev,...patch}));
+          triggerSave(patch.ct, {...appData,...patch});
+        },
+        onSignOut:()=>{
+          msalInstance.logoutPopup();
+          setPhase('login');
+          setCurrentUser(null);
+          setAppData(null);
+        }
+      })
+    );
+  }
+
+  return e('div',{className:'loading-screen'},e('div',{className:'spinner'}));
+}
+
+function SaveIndicator(p){
+  const msgs = {saving:'Saving to SharePoint…',saved:'✓ Saved',error:'⚠ Save failed — check connection',idle:''};
+  return e('div',{className:'save-indicator'+(p.state!=='idle'?' visible':'')+(p.state==='error'?' error':'')},msgs[p.state]||'');
+}
+
+
+const AVC = ['#534AB7','#0F6E56','#993C1D','#185FA5','#854F0B'];
+const stLabel = s => ({pending:'Pending',review:'In review',approved:'Approved',done:'Done'}[s]||s);
+const initials = name => name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+const uid = () => Math.random().toString(36).slice(2,9);
+
+const INIT_GROUPS = [{id:'gst',label:'GST'},{id:'it',label:'Income Tax'},{id:'acc',label:'Accounting'}];
+const BUCKETS=[{id:'recurring',label:'Recurring',icon:'ti-repeat'},{id:'periodical',label:'Periodical',icon:'ti-calendar-repeat'},{id:'onetime',label:'One-time',icon:'ti-calendar-event'},{id:'assessment',label:'Assessment',icon:'ti-clipboard-check'}];
+const PERIODS = [
+  // Monthly periods - FY 2024-25 and 2025-26
+  'Apr 2024','May 2024','Jun 2024','Jul 2024','Aug 2024','Sep 2024','Oct 2024','Nov 2024','Dec 2024','Jan 2025','Feb 2025','Mar 2025',
+  'Apr 2025','May 2025','Jun 2025','Jul 2025','Aug 2025','Sep 2025','Oct 2025','Nov 2025','Dec 2025','Jan 2026','Feb 2026','Mar 2026',
+  'Apr 2026','May 2026','Jun 2026',
+  // Quarterly periods
+  'Q1 FY25','Q2 FY25','Q3 FY25','Q4 FY25',
+  'Q1 FY26','Q2 FY26','Q3 FY26','Q4 FY26',
+  'Q1 FY27','Q2 FY27',
+  // Financial years
+  'AY 2022-23','AY 2023-24','AY 2024-25','AY 2025-26','AY 2026-27',
+];
+// Financial years for the FY field on assessment tasks (Indian FY: Apr–Mar)
+const FY_OPTIONS = [
+  'FY18-19','FY19-20','FY20-21','FY21-22','FY22-23','FY23-24','FY24-25','FY25-26','FY26-27'
+];
+// Financial years for the period field on assessment tasks
+const AY_OPTIONS = [
+  'AY 2018-19','AY 2019-20','AY 2020-21','AY 2021-22','AY 2022-23','AY 2023-24','AY 2024-25','AY 2025-26','AY 2026-27'
+];
+const STATUSES = ['all','pending','review','approved','done'];
+const TEAM = (p.initialData && p.initialData.people && p.initialData.people.length)
+  ? p.initialData.people.map((person,i)=>({id:person.id,name:person.name,idx:i}))
+  : [{id:'RK',name:'Raj Kumar',idx:0},{id:'PK',name:'Priya K',idx:1},{id:'AM',name:'Aman M',idx:2}];
+// TEAM overridden by People sheet data when loaded via auth
+// CURRENT_USER is now passed in from auth layer as window.__WT_CURRENT_USER
+// Labels for the three custom reference fields shown only on Assessment-bucket tasks. Admin-editable.
+const DEFAULT_REF_LABELS = {ref1:'Notice No.', ref2:'AO Order Ref', ref3:'Hearing Ref'};
+const FREQUENCIES = [{id:'none',label:'No recurrence'},{id:'monthly',label:'Monthly'},{id:'quarterly',label:'Quarterly'},{id:'yearly',label:'Yearly'}];
+
+const INIT_TASK_DEFS = [
+  {id:'gstr1',label:'GSTR-1 Filing',group:'gst',bucket:'recurring',isCompliance:true},
+  {id:'gstr3b',label:'GSTR-3B Filing',group:'gst',bucket:'recurring',isCompliance:true},
+  {id:'gstann',label:'GST Annual Return',group:'gst',bucket:'periodical',isCompliance:true},
+  {id:'itr3',label:'ITR-3 Filing',group:'it',bucket:'assessment',isCompliance:true},
+  {id:'advtax',label:'Advance Tax',group:'it',bucket:'periodical',isCompliance:true},
+  {id:'tds',label:'TDS Return Q1',group:'it',bucket:'periodical',isCompliance:true},
+  {id:'books',label:'Monthly Bookkeeping',group:'acc',bucket:'recurring',isCompliance:false},
+  {id:'bs',label:'Balance Sheet Prep',group:'acc',bucket:'onetime',isCompliance:false},
+  {id:'notice',label:'Notice Reply',group:'it',bucket:'onetime',isCompliance:false},
+  {id:'admin',label:'Internal Admin Task',group:'acc',bucket:'onetime',isCompliance:false},
+];
+const INIT_CLIENTS = [
+  {id:'mehta',name:'Mehta Exports',defaultFreq:'monthly'},
+  {id:'sharma',name:'Sharma Traders',defaultFreq:'monthly'},
+  {id:'patel',name:'Patel & Co',defaultFreq:'quarterly'},
+  {id:'shah',name:'Dr. Anil Shah',defaultFreq:'yearly'},
+  {id:'sunrise',name:'Sunrise Pvt Ltd',defaultFreq:'quarterly'},
+  {id:'techstart',name:'TechStart LLP',defaultFreq:'monthly'},
+];
+
+const INIT_CT = [
+  {id:uid(),tid:'gstr1',cid:'mehta',period:'Jun 2025',due:'20 Jun',prep:'PK',pi:1,rev:'RK',ri:0,status:'review',od:false,freq:'monthly',
+   st:[{id:1,t:'Collect B2B invoices',d:true},{id:2,t:'Reconcile e-way bills',d:false},{id:3,t:'Reviewer sign-off',d:false}]},
+  {id:uid(),tid:'gstr1',cid:'sharma',period:'Jun 2025',due:'20 Jun',prep:'AM',pi:2,rev:'RK',ri:0,status:'pending',od:false,freq:'monthly',
+   st:[{id:4,t:'Bank statement pending from client since 10 Jun',d:false},{id:5,t:'ITC reconciliation',d:false}]},
+  {id:uid(),tid:'gstr1',cid:'patel',period:'Jun 2025',due:'20 Jun',prep:'PK',pi:1,rev:'RK',ri:0,status:'done',od:false,freq:'quarterly',filedDate:'18 Jun',ackNo:'AA2506181234567',
+   st:[{id:6,t:'Invoices collected',d:true},{id:7,t:'Filed and ack received',d:true}]},
+  {id:uid(),tid:'gstr1',cid:'techstart',period:'Jun 2025',due:'20 Jun',prep:'AM',pi:2,rev:'PK',ri:1,status:'pending',od:false,freq:'monthly',
+   st:[{id:8,t:'Request invoices from client',d:false}]},
+  {id:uid(),tid:'gstr1',cid:'mehta',period:'May 2025',due:'11 May',prep:'PK',pi:1,rev:'RK',ri:0,status:'done',od:false,freq:'monthly',filedDate:'09 May',ackNo:'AA2505091122334',st:[{id:81,t:'Filed',d:true}]},
+  {id:uid(),tid:'gstr3b',cid:'mehta',period:'Jun 2025',due:'25 Jun',prep:'PK',pi:1,rev:'RK',ri:0,status:'pending',od:false,freq:'monthly',
+   st:[{id:9,t:'GSTR-1 reconciliation',d:false},{id:10,t:'ITC verification',d:false}]},
+  {id:uid(),tid:'gstr3b',cid:'sharma',period:'Jun 2025',due:'25 Jun',prep:'AM',pi:2,rev:'RK',ri:0,status:'pending',od:true,freq:'monthly',
+   st:[{id:11,t:'Purchase register awaited from client',d:false},{id:12,t:'ITC reconciliation',d:false}]},
+  {id:uid(),tid:'itr3',cid:'shah',period:'AY 2025-26',due:'31 Jul',prep:'AM',pi:2,rev:'RK',ri:0,status:'pending',od:false,freq:'yearly',fy:'FY24-25',ref1:'',ref2:'',ref3:'',
+   st:[{id:15,t:'Form 16 from employer',d:true},{id:16,t:'Capital gains computation',d:false}]},
+  {id:uid(),tid:'itr3',cid:'mehta',period:'AY 2024-25',due:'15 Aug',prep:'PK',pi:1,rev:'RK',ri:0,status:'review',od:false,freq:'yearly',fy:'FY23-24',ref1:'NTC/2024/00417',ref2:'AO/WD12/2024/229',ref3:'14 Aug 2025',
+   st:[{id:151,t:'Reply to notice u/s 143(2)',d:true},{id:152,t:'Submit supporting documents',d:false}]},
+  {id:uid(),tid:'advtax',cid:'sunrise',period:'Q1 FY26',due:'15 Jun',prep:'PK',pi:1,rev:'RK',ri:0,status:'done',od:false,freq:'quarterly',st:[]},
+  {id:uid(),tid:'books',cid:'techstart',period:'Jun 2025',due:'20 Jun',prep:'AM',pi:2,rev:'PK',ri:1,status:'pending',od:false,freq:'monthly',
+   st:[{id:20,t:'Bank reconciliation',d:false},{id:21,t:'Expense categorisation',d:false},{id:22,t:'Payroll entries',d:false}]},
+  {id:uid(),tid:'bs',cid:'mehta',period:'Jun 2025',due:'25 Jun',prep:'PK',pi:1,rev:'RK',ri:0,status:'review',od:false,freq:'none',st:[]},
+  {id:uid(),tid:'notice',cid:'patel',period:null,due:'05 Jul',prep:'PK',pi:1,rev:'RK',ri:0,status:'pending',od:false,freq:'none',
+   st:[{id:30,t:'Draft reply',d:false}]},
+  {id:uid(),tid:'admin',cid:null,period:null,due:'30 Jun',prep:'AM',pi:2,rev:'RK',ri:0,status:'pending',od:false,freq:'none',st:[]},
+];
+
+const MONTH_MAP={'Jan':0,'Feb':1,'Mar':2,'Apr':3,'May':4,'Jun':5,'Jul':6,'Aug':7,'Sep':8,'Oct':9,'Nov':10,'Dec':11};
+const MONTH_NAMES=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// Indian FY quarter ends: Jun, Sep, Dec, Mar
+const QUARTER_END_MONTHS=[5,8,11,2];
+// Indian FY year end: Mar
+const YEAR_END_MONTH=2;
+
+function monthIsQuarterEnd(mi){ return QUARTER_END_MONTHS.includes(mi); }
+function monthIsYearEnd(mi){ return mi===YEAR_END_MONTH; }
+
+function nextPeriod(period, freq){
+  if(!period) return '';
+  if(freq==='monthly'){
+    const m=period.match(/^([A-Za-z]{3})\s(\d{4})$/);
+    if(m){
+      let mi=MONTH_MAP[m[1]], yr=parseInt(m[2]);
+      mi++; if(mi>11){mi=0;yr++;}
+      return MONTH_NAMES[mi]+' '+yr;
+    }
+  }
+  if(freq==='quarterly'){
+    const m=period.match(/^Q(\d) FY(\d+)$/);
+    if(m){
+      let q=parseInt(m[1]), fy=parseInt(m[2]);
+      q++; if(q>4){q=1;fy++;}
+      return 'Q'+q+' FY'+fy;
+    }
+  }
+  if(freq==='yearly'){
+    const m=period.match(/^AY (\d+)-(\d+)$/);
+    if(m){
+      let a=parseInt(m[1])+1, b=parseInt(m[2])+1;
+      return 'AY '+a+'-'+String(b).slice(-2);
+    }
+  }
+  return period;
+}
+
+function periodForMonth(monthIdx, year, freq){
+  if(freq==='monthly'){
+    return MONTH_NAMES[monthIdx]+' '+year;
+  }
+  if(freq==='quarterly'){
+    if(!monthIsQuarterEnd(monthIdx)) return null;
+    const qIdxMap={5:1,8:2,11:3,2:4};
+    const q=qIdxMap[monthIdx];
+    const fy = monthIdx<=2 ? year : year+1;
+    return 'Q'+q+' FY'+String(fy).slice(-2);
+  }
+  if(freq==='yearly'){
+    if(!monthIsYearEnd(monthIdx)) return null;
+    const startYr=year-1;
+    return 'AY '+startYr+'-'+String(year).slice(-2);
+  }
+  return null;
+}
+
+// Multi-dimensional period filter helpers
+function parsePeriod(period){
+  if(!period) return {};
+  let m=period.match(/^([A-Za-z]{3}) (\d{4})$/);
+  if(m){
+    const mi=MONTH_MAP[m[1]], yr=parseInt(m[2]);
+    const fyStart=mi<=2?yr-1:yr;
+    const fy='FY'+String(fyStart).slice(-2)+'-'+String(fyStart+1).slice(-2);
+    const qNum=mi<=2?4:mi<=5?1:mi<=8?2:3;
+    return {month:m[1], quarter:'Q'+qNum, fy};
+  }
+  m=period.match(/^Q(\d) FY(\d+)$/);
+  if(m){
+    const fyEnd=parseInt(m[2]);
+    return {quarter:'Q'+m[1], fy:'FY'+String(fyEnd-1).slice(-2)+'-'+String(fyEnd).slice(-2)};
+  }
+  m=period.match(/^AY (\d+)-(\d+)$/);
+  if(m) return {fy:'FY'+m[1].slice(-2)+'-'+m[2]};
+  return {};
+}
+function periodMatchesFilter(period, f){
+  if(!period) return (f.fy||'all')==='all' && (f.quarter||'all')==='all' && (f.month||'all')==='all';
+  const p=parsePeriod(period);
+  if((f.fy||'all')!=='all' && p.fy!==f.fy) return false;
+  if((f.quarter||'all')!=='all' && p.quarter!==f.quarter) return false;
+  if((f.month||'all')!=='all' && p.month!==f.month) return false;
+  return true;
+}
+const BLANK_FILTER={fy:'all',quarter:'all',month:'all',status:'all'};
+const MONTHS_LIST=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const QUARTERS=['Q1','Q2','Q3','Q4'];
+
+// Best-effort: derive a month label and an Indian FY label from any period string,
+// so compliance rows of any shape (Jun 2025 / Q1 FY26 / AY 2025-26) can be filtered by FY/month.
+function periodToMonthLabel(period){
+  if(!period) return null;
+  const m=period.match(/^([A-Za-z]{3})\s(\d{4})$/);
+  if(m) return m[1]+' '+m[2];
+  return null; // quarterly/yearly periods don't map to a single month
+}
+function periodToFY(period){
+  if(!period) return null;
+  let m=period.match(/^([A-Za-z]{3})\s(\d{4})$/);
+  if(m){
+    const mi=MONTH_MAP[m[1]], yr=parseInt(m[2]);
+    const fyStart = mi<=2 ? yr-1 : yr; // Jan-Mar belongs to FY starting previous year (Apr)
+    return 'FY'+String(fyStart).slice(-2)+'-'+String(fyStart+1).slice(-2);
+  }
+  m=period.match(/^Q\d FY(\d+)$/);
+  if(m){
+    const fyEnd=parseInt(m[1]);
+    return 'FY'+String(fyEnd-1).slice(-2)+'-'+String(fyEnd).slice(-2);
+  }
+  m=period.match(/^AY (\d+)-(\d+)$/);
+  if(m) return 'FY'+m[1].slice(-2)+'-'+m[2];
+  return null;
+}
+
+// ---------- Excel import/export ----------
+// Reference 1/2/3 columns are only meaningful for Assessment-bucket tasks; leave blank for other rows.
+const EXCEL_COLUMNS=['Client','Task Type','Work Category','Bucket','Period','Due Date','Preparer','Reviewer','Status','Frequency','Filed Date','Ack Number','FY','Reference 1','Reference 2','Reference 3'];
+
+function rowToExcelRecord(r, taskDefs, clients, groups){
+  const td=taskDefs.find(t=>t.id===r.tid)||{};
+  const cdef=clients.find(c=>c.id===r.cid);
+  const grp=groups.find(g=>g.id===td.group);
+  return {
+    'Client': cdef ? cdef.name : (r.cid ? r.cid : ''),
+    'Task Type': td.label || r.tid,
+    'Work Category': grp ? grp.label : (td.group||''),
+    'Bucket': td.bucket||'',
+    'Period': r.period||'',
+    'Due Date': r.due||'',
+    'Preparer': r.prep||'',
+    'Reviewer': r.rev||'',
+    'Status': stLabel(r.status),
+    'Frequency': r.freq||'none',
+    'Filed Date': r.filedDate||'',
+    'Ack Number': r.ackNo||'',
+    'FY': r.fy||'',
+    'Reference 1': r.ref1||'',
+    'Reference 2': r.ref2||'',
+    'Reference 3': r.ref3||''
+  };
+}
+
+function exportToExcel(rows, taskDefs, clients, groups, filename){
+  const data=rows.map(r=>rowToExcelRecord(r,taskDefs,clients,groups));
+  const ws=XLSX.utils.json_to_sheet(data,{header:EXCEL_COLUMNS});
+  ws['!cols']=EXCEL_COLUMNS.map(c=>({wch:Math.max(12,c.length+2)}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Tasks');
+  XLSX.writeFile(wb,filename);
+}
+
+function buildTemplateWorkbook(){
+  const sample=[
+    {'Client':'Mehta Exports','Task Type':'GSTR-1 Filing','Work Category':'GST','Bucket':'recurring','Period':'Jul 2025','Due Date':'20 Jul','Preparer':'PK','Reviewer':'RK','Status':'Pending','Frequency':'monthly','Filed Date':'','Ack Number':'','FY':'','Reference 1':'','Reference 2':'','Reference 3':''},
+    {'Client':'Sunrise Pvt Ltd','Task Type':'Advance Tax','Work Category':'Income Tax','Bucket':'periodical','Period':'Q2 FY26','Due Date':'15 Sep','Preparer':'PK','Reviewer':'RK','Status':'Pending','Frequency':'quarterly','Filed Date':'','Ack Number':'','FY':'','Reference 1':'','Reference 2':'','Reference 3':''},
+    {'Client':'Dr. Anil Shah','Task Type':'ITR-3 Filing','Work Category':'Income Tax','Bucket':'assessment','Period':'AY 2025-26','Due Date':'31 Jul','Preparer':'AM','Reviewer':'RK','Status':'Pending','Frequency':'yearly','Filed Date':'','Ack Number':'','FY':'FY24-25','Reference 1':'NTC/2025/00112','Reference 2':'AO/WD08/2025/044','Reference 3':'12 Aug 2025'}
+  ];
+  const ws=XLSX.utils.json_to_sheet(sample,{header:EXCEL_COLUMNS});
+  ws['!cols']=EXCEL_COLUMNS.map(c=>({wch:Math.max(14,c.length+2)}));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Tasks');
+  return wb;
+}
+
+const STATUS_LABEL_TO_KEY={'pending':'pending','in review':'review','review':'review','approved':'approved','done':'done'};
+const FREQ_VALID=['none','monthly','quarterly','yearly'];
+
+// Parses raw sheet rows into normalized import records + per-row validation errors.
+function parseExcelRows(sheetRows){
+  const parsed=[];
+  sheetRows.forEach((row,idx)=>{
+    const errors=[];
+    const clientName=(row['Client']||'').toString().trim();
+    const taskLabel=(row['Task Type']||'').toString().trim();
+    const workCategory=(row['Work Category']||'').toString().trim();
+    const bucket=(row['Bucket']||'recurring').toString().trim().toLowerCase();
+    const period=(row['Period']||'').toString().trim();
+    const due=(row['Due Date']||'').toString().trim();
+    const prep=(row['Preparer']||'').toString().trim().toUpperCase();
+    const rev=(row['Reviewer']||'').toString().trim().toUpperCase();
+    const statusRaw=(row['Status']||'Pending').toString().trim().toLowerCase();
+    const freqRaw=(row['Frequency']||'none').toString().trim().toLowerCase();
+    const filedDate=(row['Filed Date']||'').toString().trim();
+    const ackNo=(row['Ack Number']||'').toString().trim();
+    const fy=(row['FY']||'').toString().trim();
+    const ref1=(row['Reference 1']||'').toString().trim();
+    const ref2=(row['Reference 2']||'').toString().trim();
+    const ref3=(row['Reference 3']||'').toString().trim();
+
+    if(!taskLabel) errors.push('Task Type is required');
+    if(!due) errors.push('Due Date is required');
+    if(!BUCKETS.some(b=>b.id===bucket)) errors.push('Bucket "'+bucket+'" is not recognized (use recurring/periodical/onetime/assessment)');
+    const status=STATUS_LABEL_TO_KEY[statusRaw]||'pending';
+    const freq=FREQ_VALID.includes(freqRaw)?freqRaw:'none';
+
+    parsed.push({
+      rowNum: idx+2, // +2 because row 1 is header, sheet rows are 0-indexed
+      clientName, taskLabel, workCategory, bucket, period: period||null, due, prep, rev,
+      status, freq, filedDate, ackNo, fy, ref1, ref2, ref3, errors
+    });
+  });
+  return parsed;
+}
+
+function Av(p){return e('div',{style:{width:p.size||20,height:p.size||20,borderRadius:'50%',background:AVC[p.idx%5],fontSize:(p.size||20)*0.4,fontWeight:500,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}},p.label)}
+function Pill(p){const map={'t':{bg:'var(--color-background-secondary)',c:'var(--color-text-secondary)'},'d':{bg:'#EAF3DE',c:'#27500A'},'p':{bg:'#FAC775',c:'#412402'},'b':{bg:'#F7C1C1',c:'#501313'},'r':{bg:'#B5D4F4',c:'#042C53'}};const s=map[p.k];return e('span',{style:{fontSize:9,padding:'2px 7px',borderRadius:20,background:s.bg,color:s.c,whiteSpace:'nowrap'}},p.children)}
+function St(p){const map={pending:{bg:'#FAC775',c:'#412402'},review:{bg:'#B5D4F4',c:'#042C53'},approved:{bg:'#D4BFFF',c:'#2E0F6E'},done:{bg:'#C0DD97',c:'#173404'}};const s=map[p.status]||map.pending;return e('span',{style:{fontSize:9,padding:'2px 6px',borderRadius:20,background:s.bg,color:s.c,whiteSpace:'nowrap'}},stLabel(p.status))}
+function Chk(p){
+  const st=p.state || (p.done?'done':'pending');
+  const styleMap={
+    pending:{border:'0.5px solid var(--color-border-secondary)',background:'transparent',content:'',textColor:'#042C53'},
+    review:{border:'0.5px solid #185FA5',background:'#B5D4F4',content:'…',textColor:'#042C53'},
+    approved:{border:'0.5px solid #2E0F6E',background:'#D4BFFF',content:'✓',textColor:'#2E0F6E'},
+    done:{border:'0.5px solid #534AB7',background:'#534AB7',content:'✓',textColor:'#fff'}
+  };
+  const s=styleMap[st]||styleMap.pending;
+  const titles={pending:'Pending',review:'In review — click to act',approved:'Approved — preparer to file',done:'Done — click to reopen'};
+  return e('div',{onClick:ev=>{ev.stopPropagation();p.onClick(ev)},title:titles[st]||st,style:{width:14,height:14,border:s.border,borderRadius:3,background:s.background,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,fontSize:9,color:s.textColor}},s.content);
+}
+function StChk(p){return e('div',{onClick:ev=>{ev.stopPropagation();p.onClick(ev)},style:{width:12,height:12,border:p.done?'0.5px solid #534AB7':'0.5px solid #AFA9EC',borderRadius:2,background:p.done?'#534AB7':'transparent',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,fontSize:8,color:'#fff'}},p.done?'✓':'')}
+function Btn(p){return e('button',{onClick:p.onClick,style:Object.assign({fontSize:11,padding:'5px 11px',border:p.pri?'0.5px solid #534AB7':'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:p.pri?'#534AB7':'transparent',color:p.pri?'#fff':'var(--color-text-secondary)',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:5},p.style||{})},p.children)}
+
+function periodOptions(includeAll){
+  const monthly=PERIODS.filter(p=>/^[A-Za-z]{3} \d{4}$/.test(p));
+  const quarterly=PERIODS.filter(p=>/^Q\d FY/.test(p));
+  const ay=PERIODS.filter(p=>/^AY /.test(p));
+  return [
+    includeAll?e('option',{key:'all',value:'all'},'All periods'):null,
+    e('optgroup',{label:'Monthly',key:'m'},monthly.map(p=>e('option',{key:p,value:p},p))),
+    e('optgroup',{label:'Quarterly',key:'q'},quarterly.map(p=>e('option',{key:p,value:p},p))),
+    e('optgroup',{label:'Financial year',key:'ay'},ay.map(p=>e('option',{key:p,value:p},p))),
+  ];
+}
+
+function MiniFilterBar(p){
+  // p.filter = {fy, quarter, month, status}; p.onChange(newFilter)
+  const f=p.filter||BLANK_FILTER;
+  const fyOpts=[...new Set(PERIODS.map(pr=>parsePeriod(pr).fy).filter(Boolean))].sort();
+  const upd=patch=>p.onChange({...f,...patch});
+  return e('div',{style:{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
+    e('select',{value:f.fy||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({fy:ev.target.value})},style:{fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'}},
+      [e('option',{key:'all',value:'all'},'All FY'),...fyOpts.map(fy=>e('option',{key:fy,value:fy},fy))]
+    ),
+    e('select',{value:f.quarter||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({quarter:ev.target.value})},style:{fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'}},
+      [e('option',{key:'all',value:'all'},'All Q'),...QUARTERS.map(q=>e('option',{key:q,value:q},q))]
+    ),
+    e('select',{value:f.month||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({month:ev.target.value})},style:{fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'}},
+      [e('option',{key:'all',value:'all'},'All months'),...MONTHS_LIST.map(m=>e('option',{key:m,value:m},m))]
+    ),
+    p.showStatus!==false ? STATUSES.map(s=>e('span',{key:s,onClick:ev=>{ev.stopPropagation();upd({status:s})},style:{fontSize:9,padding:'1px 7px',border:(f.status||'all')===s?'0.5px solid #AFA9EC':'0.5px solid var(--color-border-tertiary)',borderRadius:20,cursor:'pointer',color:(f.status||'all')===s?'#534AB7':'var(--color-text-secondary)',background:(f.status||'all')===s?'#EEEDFE':'transparent'}},s==='all'?'All':s[0].toUpperCase()+s.slice(1))) : null
+  );
+}
+
+// Subtask panel with inline "+ add step" entry
+function SubPanel(p){
+  const r=p.r;
+  const [draft,setDraft]=useState('');
+  const submit=()=>{
+    const v=draft.trim();
+    if(!v) return;
+    p.onAddSub(r.id,v);
+    setDraft('');
+  };
+  return e('div',{style:{background:'#F7F6FE',borderTop:'0.5px dashed #AFA9EC',padding:'7px 10px 7px 34px'}},
+    e('div',{style:{fontSize:9,fontWeight:500,color:'#534AB7',letterSpacing:'.04em',marginBottom:4,textTransform:'uppercase'}},'Steps / subtasks'),
+    r.st.map(s=>e('div',{key:s.id,style:{display:'flex',alignItems:'center',gap:6,padding:'3px 0',fontSize:11,color:'var(--color-text-secondary)'}},
+      e(StChk,{done:s.d,onClick:()=>p.onToggleSub(r.id,s.id)}),
+      e('span',{style:s.d?{textDecoration:'line-through',opacity:.5}:{}},s.t)
+    )),
+    r.st.filter(s=>!s.d).length>0 ? e('div',{style:{fontSize:10,color:'#993C1D',margin:'4px 0'}},r.st.filter(s=>!s.d).length+' step'+(r.st.filter(s=>!s.d).length>1?'s':'')+' remaining') : null,
+    e('div',{style:{display:'flex',alignItems:'center',gap:6,marginTop:6}},
+      e('i',{className:'ti ti-plus',style:{fontSize:11,color:'var(--color-text-tertiary)'},'aria-hidden':'true'}),
+      e('input',{
+        value:draft,
+        placeholder:'Add a step and press Enter…',
+        onClick:ev=>ev.stopPropagation(),
+        onChange:ev=>setDraft(ev.target.value),
+        onKeyDown:ev=>{ev.stopPropagation(); if(ev.key==='Enter') submit();},
+        style:{flex:1,fontSize:11,padding:'4px 6px',border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',outline:'none'}
+      })
+    )
+  );
+}
+
+// Combobox with inline "+ New ..." creation
+function CreatableSelect(p){
+  const [adding,setAdding]=useState(false);
+  const [draft,setDraft]=useState('');
+  const inputStyle={fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
+  if(adding){
+    return e('div',{style:{display:'flex',gap:6}},
+      e('input',{style:inputStyle,autoFocus:true,placeholder:p.placeholder||'New value…',value:draft,onChange:ev=>setDraft(ev.target.value),
+        onKeyDown:ev=>{if(ev.key==='Enter'){if(draft.trim()){p.onCreate(draft.trim());setAdding(false);setDraft('');}} if(ev.key==='Escape'){setAdding(false);setDraft('');}}}),
+      e(Btn,{onClick:()=>{if(draft.trim()){p.onCreate(draft.trim());setAdding(false);setDraft('');}}},'Add'),
+      e(Btn,{onClick:()=>{setAdding(false);setDraft('');}},'✕')
+    );
+  }
+  return e('select',{style:inputStyle,value:p.value,onChange:ev=>{ if(ev.target.value==='__new__'){setAdding(true);} else {p.onChange(ev.target.value);} }},
+    [...p.options.map(o=>e('option',{key:o.id,value:o.id},o.label)), e('option',{key:'__new__',value:'__new__'},'+ New '+p.newLabel+'…')]
+  );
+}
+
+// ---------- Excel import modal ----------
+function ExcelImportModal(p){
+  const [fileName,setFileName]=useState('');
+  const [parsed,setParsed]=useState(null); // array from parseExcelRows
+  const [mode,setMode]=useState('append'); // 'append' | 'replace'
+  const fileRef=React.useRef(null);
+
+  const handleFile=ev=>{
+    const file=ev.target.files[0];
+    if(!file) return;
+    setFileName(file.name);
+    const reader=new FileReader();
+    reader.onload=evt=>{
+      try{
+        const wb=XLSX.read(evt.target.result,{type:'array'});
+        const sheetName=wb.SheetNames[0];
+        const sheetRows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:''});
+        setParsed(parseExcelRows(sheetRows));
+      }catch(err){
+        alert('Could not read this file. Make sure it is a valid .xlsx file.\n\n'+err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const errorRows=parsed?parsed.filter(r=>r.errors.length>0):[];
+  const okRows=parsed?parsed.filter(r=>r.errors.length===0):[];
+
+  const handleConfirm=()=>{
+    p.onImport(okRows, mode);
+    p.onClose();
+  };
+
+  const downloadTemplate=()=>{
+    const wb=buildTemplateWorkbook();
+    XLSX.writeFile(wb,'worktrack_import_template.xlsx');
+  };
+
+  const labelStyle={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
+
+  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:20}},
+    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:560,maxHeight:'88vh',overflowY:'auto',boxShadow:'0 0 0 1px var(--color-border-tertiary)'}},
+      e('div',{style:{fontSize:15,fontWeight:500,color:'var(--color-text-primary)',marginBottom:4}},'Import tasks from Excel'),
+      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:14}},'Upload a spreadsheet with one row per client+task+period. Clients and task types not already in the system will be created automatically.'),
+
+      e('div',{style:{display:'flex',gap:8,marginBottom:14}},
+        e(Btn,{onClick:downloadTemplate},e('i',{className:'ti ti-download','aria-hidden':'true'}),'Download template'),
+        e('label',{style:{fontSize:11,padding:'5px 11px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'transparent',color:'var(--color-text-secondary)',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:5}},
+          e('i',{className:'ti ti-upload','aria-hidden':'true'}),fileName||'Choose .xlsx file…',
+          e('input',{type:'file',accept:'.xlsx,.xls',ref:fileRef,onChange:handleFile,style:{display:'none'}})
+        )
+      ),
+
+      !parsed ? e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',padding:'16px',textAlign:'center',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},'Choose a file to preview its contents before importing.') :
+      e(React.Fragment,null,
+        e('div',{style:{display:'flex',gap:8,marginBottom:12}},
+          e('div',{style:{flex:1,background:'#EAF3DE',borderRadius:'var(--border-radius-md)',padding:'7px 10px'}},
+            e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#27500A'}},'Valid rows'),
+            e('div',{style:{fontSize:19,fontWeight:500,color:'#27500A'}},okRows.length)
+          ),
+          errorRows.length>0 ? e('div',{style:{flex:1,background:'#FAECE7',borderRadius:'var(--border-radius-md)',padding:'7px 10px'}},
+            e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#993C1D'}},'Rows with errors'),
+            e('div',{style:{fontSize:19,fontWeight:500,color:'#993C1D'}},errorRows.length)
+          ) : null
+        ),
+
+        errorRows.length>0 ? e('div',{style:{marginBottom:12,maxHeight:140,overflowY:'auto',border:'0.5px solid #F0997B',borderRadius:'var(--border-radius-md)',background:'#FAECE7',padding:'8px 10px'}},
+          e('div',{style:{fontSize:10,fontWeight:500,color:'#712B13',marginBottom:4}},'These rows will be skipped:'),
+          errorRows.map(r=>e('div',{key:r.rowNum,style:{fontSize:10,color:'#712B13',marginBottom:2}},'Row '+r.rowNum+': '+r.errors.join('; ')))
+        ) : null,
+
+        e('div',{style:{marginBottom:14}},
+          e('label',{style:labelStyle},'Import mode'),
+          e('div',{style:{display:'flex',gap:6}},
+            e('div',{onClick:()=>setMode('append'),style:{flex:1,textAlign:'center',padding:'8px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='append'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='append'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='append'?500:400}},
+              e('div',null,'Append'),
+              e('div',{style:{fontSize:9,fontWeight:400,marginTop:2}},'Add as new rows, even if duplicates exist')
+            ),
+            e('div',{onClick:()=>setMode('replace'),style:{flex:1,textAlign:'center',padding:'8px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='replace'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='replace'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='replace'?500:400}},
+              e('div',null,'Replace matching'),
+              e('div',{style:{fontSize:9,fontWeight:400,marginTop:2}},'Update rows matching Client+Task+Period; leave the rest untouched')
+            )
+          )
+        ),
+
+        e('div',{style:{maxHeight:200,overflowY:'auto',border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',marginBottom:14}},
+          e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 70px 60px',gap:6,padding:'5px 8px',background:'#EEEDFE',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7',position:'sticky',top:0}},
+            e('div',null,'Client'),e('div',null,'Task'),e('div',null,'Period'),e('div',null,'Status')
+          ),
+          okRows.slice(0,50).map((r,i)=>e('div',{key:i,style:{display:'grid',gridTemplateColumns:'1fr 1fr 70px 60px',gap:6,padding:'5px 8px',borderTop:'0.5px solid var(--color-border-tertiary)',fontSize:11}},
+            e('div',null,r.clientName||e('em',{style:{color:'var(--color-text-tertiary)'}},'(internal)')),
+            e('div',null,r.taskLabel),
+            e('div',{style:{color:'var(--color-text-tertiary)'}},r.period||'—'),
+            e('div',{style:{color:'var(--color-text-tertiary)'}},stLabel(r.status))
+          )),
+          okRows.length>50 ? e('div',{style:{padding:'5px 8px',fontSize:10,color:'var(--color-text-tertiary)',borderTop:'0.5px solid var(--color-border-tertiary)'}},'…and '+(okRows.length-50)+' more rows') : null
+        )
+      ),
+
+      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
+        e(Btn,{onClick:p.onClose},'Cancel'),
+        e(Btn,{pri:true,onClick:handleConfirm,style:{opacity:(!parsed||okRows.length===0)?0.5:1,pointerEvents:(!parsed||okRows.length===0)?'none':'auto'}},
+          mode==='replace'?'Replace matching & import '+okRows.length:'Append '+okRows.length+' rows')
+      )
+    )
+  );
+}
+
+
+function BulkCreateModal(p){
+  const td=p.taskDef;
+  const rowsForTask=p.ct.filter(x=>x.tid===td.id && x.cid);
+  // group by client, take the most recent row per client as reference
+  const byClient={};
+  rowsForTask.forEach(r=>{ if(!byClient[r.cid] || (r.period||'')>(byClient[r.cid].period||'')) byClient[r.cid]=r; });
+
+  const [monthIdx,setMonthIdx]=useState(5); // default June
+  const [year,setYear]=useState(2026);
+  const [rows,setRows]=useState(null);
+
+  const buildPreview=()=>{
+    const out=[];
+    p.clients.forEach(cl=>{
+      const ref=byClient[cl.id];
+      const freq = ref ? ref.freq : 'monthly';
+      const usedFreq = (freq && freq!=='none') ? freq : 'monthly';
+      const noPriorInstance = !ref;
+      const per=periodForMonth(monthIdx,year,usedFreq);
+      if(per===null) return; // not a due period for this client's frequency this month
+      // skip if this exact period already exists for this client+task
+      const exists=p.ct.some(x=>x.tid===td.id && x.cid===cl.id && x.period===per);
+      if(exists) return;
+      out.push({
+        cid:cl.id, cname:cl.name, freq:usedFreq, period:per,
+        due: ref ? ref.due.replace(/^\d+/, '20') : '20', // best-effort same day-of-month
+        prep: ref?ref.prep:'PK', pi: ref?ref.pi:1, rev: ref?ref.rev:'RK', ri: ref?ref.ri:0,
+        noPriorInstance, selected:true
+      });
+    });
+    setRows(out);
+  };
+
+  const updateRow=(cid,patch)=>setRows(prev=>prev.map(r=>r.cid===cid?{...r,...patch}:r));
+
+  const confirm=()=>{
+    const selected=rows.filter(r=>r.selected);
+    selected.forEach(r=>{
+      p.onCreate({id:uid(),tid:td.id,cid:r.cid,period:r.period,due:r.due,prep:r.prep,pi:r.pi,rev:r.rev,ri:r.ri,
+        status:'pending',od:false,freq:r.freq,st:[]});
+    });
+    p.onClose();
+  };
+
+  const labelStyle={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
+  const inputStyle={fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
+
+  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:20}},
+    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:520,maxHeight:'88vh',overflowY:'auto',boxShadow:'0 0 0 1px var(--color-border-tertiary)'}},
+      e('div',{style:{fontSize:15,fontWeight:500,color:'var(--color-text-primary)',marginBottom:4}},'Create '+td.label+' for all clients'),
+      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},'Generates one instance per assigned client based on each client\'s own recurrence frequency. Monthly clients get every month; quarterly and yearly clients only get an instance when this month is their period end.'),
+
+      !rows ? e(React.Fragment,null,
+        e('div',{style:{display:'flex',gap:10,marginBottom:16}},
+          e('div',{style:{flex:1}},e('label',{style:labelStyle},'Month'),
+            e('select',{style:inputStyle,value:monthIdx,onChange:ev=>setMonthIdx(parseInt(ev.target.value))},
+              MONTH_NAMES.map((m,i)=>e('option',{key:m,value:i},m)))),
+          e('div',{style:{flex:1}},e('label',{style:labelStyle},'Year'),
+            e('input',{style:inputStyle,type:'number',value:year,onChange:ev=>setYear(parseInt(ev.target.value)||year)}))
+        ),
+        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:16,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},
+          monthIsQuarterEnd(monthIdx)?'This month is a quarter end — quarterly clients will also be included.':'This month is not a quarter end — only monthly clients will be included.',
+          monthIsYearEnd(monthIdx)?' This month is also the year end — yearly (assessment) clients will be included too.':''
+        ),
+        e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
+          e(Btn,{onClick:p.onClose},'Cancel'),
+          e(Btn,{pri:true,onClick:buildPreview},'Preview clients →')
+        )
+      ) : e(React.Fragment,null,
+        rows.length===0 ? e('div',{style:{padding:20,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No clients are due for '+MONTH_NAMES[monthIdx]+' '+year+' under their assigned frequency.') :
+        e('div',{style:{marginBottom:14}},
+          e('div',{style:{display:'grid',gridTemplateColumns:'18px 1fr 64px 90px 60px',gap:8,padding:'4px 6px',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'var(--color-text-tertiary)',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+            e('div'),e('div'),e('div','Freq'),e('div','Period'),e('div','Due')
+          ),
+          rows.map(r=>e('div',{key:r.cid,style:{display:'grid',gridTemplateColumns:'18px 1fr 64px 90px 60px',gap:8,alignItems:'center',padding:'6px',borderBottom:'0.5px solid var(--color-border-tertiary)',background:r.noPriorInstance?'#FAEEDA':'transparent'}},
+            e('input',{type:'checkbox',checked:r.selected,onChange:ev=>updateRow(r.cid,{selected:ev.target.checked}),style:{margin:0}}),
+            e('div',null,
+              e('div',{style:{fontSize:12,color:'var(--color-text-primary)'}},r.cname),
+              r.noPriorInstance?e('div',{style:{fontSize:9,color:'#633806'}},'No prior instance — assumed monthly, confirm or adjust'):null
+            ),
+            e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},r.freq),
+            e('input',{value:r.period,onChange:ev=>updateRow(r.cid,{period:ev.target.value}),style:{fontSize:11,padding:'3px 5px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)'}}),
+            e('input',{value:r.due,onChange:ev=>updateRow(r.cid,{due:ev.target.value}),style:{fontSize:11,padding:'3px 5px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)'}})
+          ))
+        ),
+        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+          e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},rows.filter(r=>r.selected).length+' of '+rows.length+' selected'),
+          e('div',{style:{display:'flex',gap:8}},
+            e(Btn,{onClick:()=>setRows(null)},'← Back'),
+            e(Btn,{onClick:p.onClose},'Cancel'),
+            e(Btn,{pri:true,onClick:confirm},'Create '+rows.filter(r=>r.selected).length+' tasks')
+          )
+        )
+      )
+    )
+  );
+}
+
+// ---------- Closing prompt modal ----------
+function ClosingPromptModal(p){
+  const {row, taskDef, refLabels, closeType, onConfirm, onCancel} = p;
+  const isCompliance = !!taskDef.isCompliance;
+  const isAssessment = taskDef.bucket==='assessment';
+
+  const [filedDate,setFiledDate]=useState(row.filedDate||'');
+  const [ackNo,setAckNo]=useState(row.ackNo||'');
+  const [fy,setFy]=useState(row.fy||'');
+  const [ref1,setRef1]=useState(row.ref1||'');
+  const [ref2,setRef2]=useState(row.ref2||'');
+  const [ref3,setRef3]=useState(row.ref3||'');
+
+  const inputStyle={fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
+  const labelStyle={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
+  const fieldWrap={marginBottom:12};
+
+  const handleConfirm=()=>{
+    const details={};
+    if(isCompliance){ details.filedDate=filedDate||undefined; details.ackNo=ackNo||undefined; }
+    if(isAssessment){ details.fy=fy||undefined; details.ref1=ref1||undefined; details.ref2=ref2||undefined; details.ref3=ref3||undefined; }
+    onConfirm(details);
+  };
+
+  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1100,padding:20}},
+    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:380,boxShadow:'0 0 0 1px var(--color-border-tertiary)'}},
+      e('div',{style:{fontSize:14,fontWeight:500,color:'var(--color-text-primary)',marginBottom:3}},
+        closeType==='noApproval'?'Close without approval':closeType==='approveAndFile'?'Approve & file':'Mark as filed'),
+      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},
+        taskDef.label+' · '+(row.period||'no period')+(closeType==='noApproval'?' — closing without reviewer approval.'
+          :closeType==='approveAndFile'?' — you are approving and filing this in one step.'
+          :' — enter filing details to mark as done.')
+      ),
+
+      isCompliance ? e(React.Fragment,null,
+        e('div',{style:{fontSize:11,fontWeight:500,color:'#534AB7',marginBottom:10,paddingBottom:6,borderBottom:'0.5px solid var(--color-border-tertiary)'}},'Filing details'),
+        e('div',{style:fieldWrap},e('label',{style:labelStyle},'Filed date'),
+          e('input',{style:inputStyle,placeholder:'e.g. 20 Jun',value:filedDate,onChange:ev=>setFiledDate(ev.target.value)})
+        ),
+        e('div',{style:fieldWrap},e('label',{style:labelStyle},'Acknowledgement number'),
+          e('input',{style:inputStyle,placeholder:'Ack. no.',value:ackNo,onChange:ev=>setAckNo(ev.target.value)})
+        )
+      ) : null,
+
+      isAssessment ? e(React.Fragment,null,
+        e('div',{style:{fontSize:11,fontWeight:500,color:'#534AB7',marginBottom:10,paddingBottom:6,borderBottom:'0.5px solid var(--color-border-tertiary)',marginTop:isCompliance?12:0}},'Assessment details'),
+        e('div',{style:fieldWrap},e('label',{style:labelStyle},'FY'),
+          e('select',{style:inputStyle,value:fy,onChange:ev=>setFy(ev.target.value)},
+            [e('option',{key:'',value:''},'— select FY —'),...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f))]
+          )
+        ),
+        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}},
+          e('div',null,e('label',{style:labelStyle},refLabels.ref1),e('input',{style:inputStyle,value:ref1,onChange:ev=>setRef1(ev.target.value)})),
+          e('div',null,e('label',{style:labelStyle},refLabels.ref2),e('input',{style:inputStyle,value:ref2,onChange:ev=>setRef2(ev.target.value)})),
+          e('div',null,e('label',{style:labelStyle},refLabels.ref3),e('input',{style:inputStyle,value:ref3,onChange:ev=>setRef3(ev.target.value)}))
+        )
+      ) : null,
+
+      e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:14}},
+        'All fields are optional — you can fill them in later by expanding the task row.'
+      ),
+
+      closeType==='noApproval' ? e('div',{style:{fontSize:10,color:'#993C1D',background:'#FAECE7',border:'0.5px solid #F0997B',borderRadius:'var(--border-radius-md)',padding:'6px 9px',marginBottom:14}},
+        '⚠ This will be flagged as "closed without approval" in Compliance history.'
+      ) : null,
+
+      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
+        e(Btn,{onClick:onCancel},'Cancel'),
+        e(Btn,{pri:true,onClick:handleConfirm},closeType==='noApproval'?'Close without approval':closeType==='approveAndFile'?'Approve & file':'Mark as filed')
+      )
+    )
+  );
+}
+
+// ---------- Add Task modal ----------
+function AddTaskModal(p){
+  const [mode,setMode]=useState('assign');
+  const [taskTypeId,setTaskTypeId]=useState(p.taskDefs[0]?.id||'');
+  const [newLabel,setNewLabel]=useState('');
+  const [newGroup,setNewGroup]=useState(p.groups[0]?.id||'');
+  const [newBucket,setNewBucket]=useState('recurring');
+  const [clientId,setClientId]=useState(p.clients[0]?.id||'');
+  const [noClient,setNoClient]=useState(false);
+  const [noPeriod,setNoPeriod]=useState(false);
+  const [period,setPeriod]=useState('Jun 2025');
+  const [due,setDue]=useState('');
+  const [prep,setPrep]=useState('PK');
+  const [rev,setRev]=useState('RK');
+  const [freq,setFreq]=useState('none');
+  const [newIsCompliance,setNewIsCompliance]=useState(false);
+
+  React.useEffect(()=>{
+    if(!noClient && clientId && mode==='assign' && taskTypeId){
+      const existing=p.ct.find(x=>x.cid===clientId && x.tid===taskTypeId);
+      setFreq(existing ? (existing.freq||'none') : 'none');
+    }
+  },[clientId,noClient,taskTypeId,mode]);
+
+  const labelStyle={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
+  const inputStyle={fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
+  const fieldWrap={marginBottom:12};
+
+  const handleSubmit=()=>{
+    const finalClientId = noClient ? null : clientId;
+    const finalPeriod = noPeriod ? null : period;
+    if(mode==='newtype'){
+      if(!newLabel.trim()) return;
+      const newId='custom_'+uid();
+      p.onCreateTaskType({id:newId,label:newLabel.trim(),group:newGroup,bucket:newBucket,isCompliance:newIsCompliance});
+      if(due){
+        p.onAddAssignment({id:uid(),tid:newId,cid:finalClientId,period:finalPeriod,due,prep,rev,
+          pi:TEAM.find(t=>t.id===prep).idx,ri:TEAM.find(t=>t.id===rev).idx,
+          status:'pending',od:false,freq:finalClientId?freq:'none',st:[]});
+      }
+    } else {
+      if(!taskTypeId||!due) return;
+      p.onAddAssignment({id:uid(),tid:taskTypeId,cid:finalClientId,period:finalPeriod,due,prep,rev,
+        pi:TEAM.find(t=>t.id===prep).idx,ri:TEAM.find(t=>t.id===rev).idx,
+        status:'pending',od:false,freq:finalClientId?freq:'none',st:[]});
+    }
+    p.onClose();
+  };
+
+  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:20}},
+    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:440,maxHeight:'88vh',overflowY:'auto',boxShadow:'0 0 0 1px var(--color-border-tertiary)'}},
+      e('div',{style:{fontSize:15,fontWeight:500,color:'var(--color-text-primary)',marginBottom:4}},'Add task'),
+      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:14}},'Assign an existing task type to a client, or create a brand new task type.'),
+      e('div',{style:{display:'flex',gap:6,marginBottom:16}},
+        e('div',{onClick:()=>setMode('assign'),style:{flex:1,textAlign:'center',padding:'7px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='assign'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='assign'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='assign'?500:400}},'Assign existing task'),
+        e('div',{onClick:()=>setMode('newtype'),style:{flex:1,textAlign:'center',padding:'7px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='newtype'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='newtype'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='newtype'?500:400}},'Create new task type')
+      ),
+
+      mode==='newtype' ? e(React.Fragment,null,
+        e('div',{style:fieldWrap},e('label',{style:labelStyle},'New task type name'),
+          e('input',{style:inputStyle,placeholder:'e.g. PT Return Filing',value:newLabel,onChange:ev=>setNewLabel(ev.target.value)})),
+        e('div',{style:{display:'flex',gap:10,marginBottom:12}},
+          e('div',{style:{flex:1}},e('label',{style:labelStyle},'Work category'),
+            e(CreatableSelect,{value:newGroup,options:p.groups,newLabel:'category',placeholder:'e.g. ROC / MCA',
+              onChange:setNewGroup,onCreate:label=>{const g=p.onCreateGroup(label); setNewGroup(g.id);}})),
+          e('div',{style:{flex:1}},e('label',{style:labelStyle},'Bucket'),
+            e('select',{style:inputStyle,value:newBucket,onChange:ev=>setNewBucket(ev.target.value)},BUCKETS.map(b=>e('option',{key:b.id,value:b.id},b.label))))
+        ),
+        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:8,padding:'7px 9px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},'This creates a reusable task type. Fill in the assignment fields below to also create the first instance now.'),
+        e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:6,marginBottom:12,cursor:'pointer',color:'var(--color-text-secondary)'}},
+          e('input',{type:'checkbox',checked:newIsCompliance,onChange:ev=>setNewIsCompliance(ev.target.checked),style:{margin:0}}),
+          'Track this as a statutory compliance filing (shows in Compliance history)'
+        )
+      ) : null,
+
+      e('div',{style:{fontSize:11,fontWeight:500,color:'var(--color-text-primary)',margin:'4px 0 10px',borderTop:'0.5px solid var(--color-border-tertiary)',paddingTop:12}},'Assignment details'),
+
+      mode==='assign' ? e('div',{style:fieldWrap},e('label',{style:labelStyle},'Task type'),
+        e('select',{style:inputStyle,value:taskTypeId,onChange:ev=>setTaskTypeId(ev.target.value)},p.taskDefs.map(t=>e('option',{key:t.id,value:t.id},t.label)))) : null,
+
+      e('div',{style:fieldWrap},
+        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
+          e('label',{style:labelStyle},'Client'),
+          e('label',{style:{fontSize:10,color:'var(--color-text-tertiary)',display:'flex',alignItems:'center',gap:4,cursor:'pointer'}},
+            e('input',{type:'checkbox',checked:noClient,onChange:ev=>setNoClient(ev.target.checked),style:{margin:0}}),'Internal / non-client task')
+        ),
+        !noClient ? e('select',{style:inputStyle,value:clientId,onChange:ev=>setClientId(ev.target.value)},p.clients.map(c=>e('option',{key:c.id,value:c.id},c.name))) : null
+      ),
+
+      e('div',{style:fieldWrap},
+        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
+          e('label',{style:labelStyle},'Period'),
+          e('label',{style:{fontSize:10,color:'var(--color-text-tertiary)',display:'flex',alignItems:'center',gap:4,cursor:'pointer'}},
+            e('input',{type:'checkbox',checked:noPeriod,onChange:ev=>setNoPeriod(ev.target.checked),style:{margin:0}}),'No period (one-off task)')
+        ),
+        !noPeriod ? e('select',{style:inputStyle,value:period,onChange:ev=>setPeriod(ev.target.value)},periodOptions(false)) : null
+      ),
+
+      e('div',{style:{marginBottom:12}},e('label',{style:labelStyle},'Due date'),
+        e('input',{style:inputStyle,placeholder:'e.g. 20 Jul',value:due,onChange:ev=>setDue(ev.target.value)})),
+
+      e('div',{style:{display:'flex',gap:10,marginBottom:12}},
+        e('div',{style:{flex:1}},e('label',{style:labelStyle},'Preparer'),
+          e('select',{style:inputStyle,value:prep,onChange:ev=>setPrep(ev.target.value)},TEAM.map(t=>e('option',{key:t.id,value:t.id},t.name)))),
+        e('div',{style:{flex:1}},e('label',{style:labelStyle},'Reviewer'),
+          e('select',{style:inputStyle,value:rev,onChange:ev=>setRev(ev.target.value)},TEAM.map(t=>e('option',{key:t.id,value:t.id},t.name))))
+      ),
+
+      !noClient ? e('div',{style:{marginBottom:18}},
+        e('label',{style:labelStyle},'Recurrence for this client + task'),
+        e('select',{style:inputStyle,value:freq,onChange:ev=>setFreq(ev.target.value)},FREQUENCIES.map(f=>e('option',{key:f.id,value:f.id},f.label))),
+        e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginTop:4}},'Specific to this client + task type. New occurrences are created manually with "+ Next occurrence", or in bulk via the task\'s "Create for all clients" button.')
+      ) : null,
+
+      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
+        e(Btn,{onClick:p.onClose},'Cancel'),
+        e(Btn,{pri:true,onClick:handleSubmit},mode==='newtype'?'Create task type':'Add task')
+      )
+    )
+  );
+}
+
+function WorkTrackApp(p){
+  // p.initialData = {groups, taskDefs, clients, ct, people, refLabels, settings}
+  // p.currentUser = {id, name, isReviewer, email}
+  // p.onDataChange = fn(patch) — called whenever data changes, triggers auto-save
+  const CURRENT_USER = p.currentUser ? (p.currentUser.id || p.currentUser.email.split('@')[0].toUpperCase()) : 'RK';
+  const [groups,setGroups]=useState(p.initialData.groups||INIT_GROUPS);
+  const [taskDefs,setTaskDefs]=useState(p.initialData.taskDefs||INIT_TASK_DEFS);
+  const [clients,setClients]=useState(p.initialData.clients||INIT_CLIENTS);
+  const [ct,setCt]=useState(p.initialData.ct||INIT_CT);
+  const [view,setView]=useState('dashboard');
+  const [bucket,setBucket]=useState(null);
+  const [bucketFilters,setBucketFilters]=useState(()=>{
+    const init={};
+    BUCKETS.forEach(b=>init[b.id]={...BLANK_FILTER});
+    return init;
+  });
+  const [taskOverrides,setTaskOverrides]=useState({});
+  const [expTask,setExpTask]=useState(null);
+  const [expCl,setExpCl]=useState(null);
+  const [expCC,setExpCC]=useState(null);
+  const [expNT,setExpNT]=useState(null);
+  const [focusClient,setFocusClient]=useState(null);
+  const [clientFilter,setClientFilter]=useState('all');
+  const [teamFilter,setTeamFilter]=useState({...BLANK_FILTER});
+  const [showAddModal,setShowAddModal]=useState(false);
+  const [nextOccurDraft,setNextOccurDraft]=useState(null); // {row, period, due}
+  const [bulkCreateTask,setBulkCreateTask]=useState(null); // taskDef or null
+  const [showExcelModal,setShowExcelModal]=useState(false);
+  const [closingPrompt,setClosingPrompt]=useState(null); // {rowId, closeType:'review'|'noReview'}
+  const [refLabels,setRefLabels]=useState((p.initialData&&p.initialData.refLabels)||DEFAULT_REF_LABELS);
+  const [assessmentFYFilter,setAssessmentFYFilter]=useState('all');
+  const [assessmentRefFilter,setAssessmentRefFilter]=useState({field:'all',query:''});
+  const [assessmentHideDone,setAssessmentHideDone]=useState(true);
+  const [complianceFY,setComplianceFY]=useState('all');
+  const [complianceMonth,setComplianceMonth]=useState('all');
+  const [complianceTypeFilter,setComplianceTypeFilter]=useState('all'); // taskDef id or 'all'
+  const [complianceClientFilter,setComplianceClientFilter]=useState('all'); // client id or 'all'
+
+  const getTaskFilter = td => {
+    if(taskOverrides[td.id]) return taskOverrides[td.id];
+    return bucketFilters[td.bucket] || {period:'all',status:'all'};
+  };
+  const filtForTask = (rows, td) => {
+    const f=getTaskFilter(td);
+    let r=rows;
+    const hasPerFilter=(f.fy||'all')!=='all'||(f.quarter||'all')!=='all'||(f.month||'all')!=='all';
+    if(hasPerFilter) r=r.filter(x=>periodMatchesFilter(x.period, f));
+    if((f.status||'all')!=='all') r=r.filter(x=>x.status===f.status);
+    return r;
+  };
+  const tStats = td => { const rows=filtForTask(ct.filter(x=>x.tid===td.id),td); return {total:rows.length,done:rows.filter(x=>x.status==='done').length,pending:rows.filter(x=>x.status==='pending').length,review:rows.filter(x=>x.status==='review').length,approved:rows.filter(x=>x.status==='approved').length}; };
+  const bStats = bid => {
+    const tds=taskDefs.filter(t=>t.bucket===bid);
+    let total=0,done=0,pending=0;
+    tds.forEach(td=>{const s=tStats(td);total+=s.total;done+=s.done;pending+=s.pending+s.review+s.approved;});
+    return {total,done,pending};
+  };
+
+  const setBucketFilter=(bid,patch)=>setBucketFilters(prev=>({...prev,[bid]:{...prev[bid],...patch}}));
+  const setTaskOverride=(tid,patch)=>setTaskOverrides(prev=>({...prev,[tid]:{...(prev[tid]||bucketFilters[(taskDefs.find(t=>t.id===tid)||{}).bucket]||BLANK_FILTER),...patch}}));
+  const clearTaskOverride=tid=>setTaskOverrides(prev=>{const n={...prev};delete n[tid];return n;});
+
+  // Auto-save: whenever ct/clients/taskDefs/groups change, notify parent
+  const saveToSharePoint=(newCt,newGroups,newTaskDefs,newClients)=>{
+    if(p.onDataChange){
+      p.onDataChange({
+        ct:newCt||ct,
+        groups:newGroups||groups,
+        taskDefs:newTaskDefs||taskDefs,
+        clients:newClients||clients,
+        people:TEAM.map(t=>({id:t.id,name:t.name,role:'preparer',accountType:'shared'})),
+        refLabels
+      });
+    }
+  };
+  const wrapCt=(fn)=>(prev=>{const next=fn(prev);saveToSharePoint(next,null,null,null);return next;});
+  const wrapGroups=(fn)=>(prev=>{const next=fn(prev);saveToSharePoint(null,next,null,null);return next;});
+  const wrapTaskDefs=(fn)=>(prev=>{const next=fn(prev);saveToSharePoint(null,null,next,null);return next;});
+  const wrapClients=(fn)=>(prev=>{const next=fn(prev);saveToSharePoint(null,null,null,next);return next;});
+
+  const toggleSub=(rowId,sid)=>setCt(wrapCt(prev=>prev.map(r=>r.id===rowId?{...r,st:r.st.map(s=>s.id===sid?{...s,d:!s.d}:s)}:r)));
+  const addSub=(rowId,text)=>setCt(wrapCt(prev=>prev.map(r=>r.id===rowId?{...r,st:[...r.st,{id:uid(),t:text,d:false}]}:r)));
+  // Workflow: if preparer === reviewer, a single action goes straight Pending -> Done (and back).
+  // If they differ: preparer's action moves Pending -> Review; reviewer's action moves Review -> Done.
+  // Helper: given a row, decide if closing needs a prompt
+  // needsFilingPrompt: compliance tasks need date+ack when preparer marks Done (after approval)
+  // needsAssessmentPrompt: assessment tasks need FY+refs when closing
+  const needsFilingPrompt=(r)=>!!( taskDefs.find(t=>t.id===r.tid)||{}).isCompliance;
+  const needsAssessmentPrompt=(r)=>( taskDefs.find(t=>t.id===r.tid)||{}).bucket==='assessment';
+
+  const finaliseClose=(rowId, closeType, details)=>{
+    setCt(prev=>prev.map(r=>{
+      if(r.id!==rowId) return r;
+      return {...r, status:'done', closedWithoutReview:closeType==='noApproval', resignNote:undefined, ...details};
+    }));
+    setClosingPrompt(null);
+  };
+
+  // Preparer marks Done after approval — triggers filing prompt if compliance/assessment
+  const preparerMarkDone=(rowId)=>{
+    const r=ct.find(x=>x.id===rowId);
+    if(!r) return;
+    if(needsFilingPrompt(r)||needsAssessmentPrompt(r)){
+      setClosingPrompt({rowId, closeType:'withApproval'});
+    } else {
+      finaliseClose(rowId,'withApproval',{});
+    }
+  };
+
+  const advanceStatus=(rowId, actorRole)=>{
+    const r=ct.find(x=>x.id===rowId);
+    if(!r) return;
+    const samePerson=r.prep===r.rev;
+
+    // Reopen from Done
+    if(r.status==='done'){
+      setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'pending',closedWithoutReview:false}:x));
+      return;
+    }
+
+    if(samePerson){
+      // Same person: Pending→Approved→Done (skip review step entirely)
+      if(r.status==='pending'){ setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'approved'}:x)); return; }
+      if(r.status==='approved'){ preparerMarkDone(rowId); return; }
+      return;
+    }
+
+    if(actorRole==='preparer'){
+      if(r.status==='pending'){ setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'review'}:x)); return; }
+      if(r.status==='approved'){ preparerMarkDone(rowId); return; } // preparer files after approval
+      if(r.status==='review'){ setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'pending'}:x)); return; } // undo submit
+      return;
+    }
+    if(actorRole==='reviewer'){
+      if(r.status==='review'){ setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'approved',resignNote:undefined}:x)); return; } // approve
+      if(r.status==='approved'){ setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'review'}:x)); return; } // reviewer withdraws approval
+      return;
+    }
+  };
+
+  const resignToPreparer=(rowId, note)=>setCt(prev=>prev.map(r=>r.id===rowId?{...r,status:'pending',resignNote:note||'Sent back by reviewer for changes.'}:r));
+
+  // Reviewer personally files (approve + file in one step) — triggers filing prompt for compliance tasks
+  const approveAndFile=(rowId)=>{
+    const r=ct.find(x=>x.id===rowId);
+    if(!r) return;
+    if(needsFilingPrompt(r)||needsAssessmentPrompt(r)){
+      setClosingPrompt({rowId, closeType:'approveAndFile'});
+    } else {
+      finaliseClose(rowId,'approveAndFile',{});
+    }
+  };
+
+  // Close without approval: reviewer skips the normal approval step
+  const closeWithoutReview=(rowId)=>{
+    const r=ct.find(x=>x.id===rowId);
+    if(!r) return;
+    if(needsFilingPrompt(r)||needsAssessmentPrompt(r)){
+      setClosingPrompt({rowId, closeType:'noApproval'});
+    } else {
+      finaliseClose(rowId,'noApproval',{});
+    }
+  };
+
+  const toggleDone=(rowId)=>setCt(wrapCt(prev=>prev.map(r=>r.id===rowId?{...r,status:r.status==='done'?'pending':'done'}:r)));
+  const updateFreqForClientTask=(cid,tid,freq)=>setCt(prev=>prev.map(r=>(r.cid===cid&&r.tid===tid)?{...r,freq}:r));
+  const updateRowFilingInfo=(rowId,patch)=>setCt(prev=>prev.map(r=>r.id===rowId?{...r,...patch}:r));
+  const toggleTaskCompliance=(tid)=>setTaskDefs(prev=>prev.map(t=>t.id===tid?{...t,isCompliance:!t.isCompliance}:t));
+
+  const goView=v=>{setView(v);setBucket(null);setExpTask(null);setExpCl(null);setExpCC(null);setExpNT(null);setFocusClient(null);};
+  const goClient=cid=>{setFocusClient(cid);setView('clients');setExpCC(cid);setExpNT(null);};
+
+  const handleCreateTaskType=newType=>setTaskDefs(wrapTaskDefs(prev=>[...prev,newType]));
+  const handleAddAssignment=newRow=>setCt(wrapCt(prev=>[...prev,newRow]));
+  const handleCreateGroup=label=>{
+    const id='grp_'+uid();
+    const g={id,label};
+    setGroups(prev=>[...prev,g]);
+    return g;
+  };
+  const updateClientFreq=(cid,freq)=>setClients(prev=>prev.map(c=>c.id===cid?{...c,defaultFreq:freq}:c));
+
+  const startNextOccurrence=row=>{
+    const np=nextPeriod(row.period,row.freq);
+    setNextOccurDraft({rowId:row.id,baseRow:row,period:np,due:row.due});
+  };
+  const confirmNextOccurrence=()=>{
+    if(!nextOccurDraft) return;
+    const base=nextOccurDraft.baseRow;
+    const newRow={...base,id:uid(),period:nextOccurDraft.period,due:nextOccurDraft.due,status:'pending',od:false,
+      st:base.st.map(s=>({id:uid(),t:s.t,d:false}))};
+    setCt(prev=>[...prev,newRow]);
+    setNextOccurDraft(null);
+  };
+
+  const handleBulkCreate=newRow=>setCt(wrapCt(prev=>[...prev,newRow]));
+
+  // Import parsed Excel rows. Auto-creates clients, work categories, and task types that don't exist yet.
+  // mode 'append': always add as new rows.
+  // mode 'replace': for each imported row, if an existing row matches on client+task+period, update it in place; otherwise add new.
+  const handleExcelImport=(importRows, mode)=>{
+    // 1. Resolve/auto-create groups (work categories) synchronously against current state
+    let nextGroups=[...groups];
+    importRows.forEach(r=>{
+      if(r.workCategory && !nextGroups.some(g=>g.label.toLowerCase()===r.workCategory.toLowerCase())){
+        nextGroups.push({id:'grp_'+uid(),label:r.workCategory});
+      }
+    });
+
+    // 2. Resolve/auto-create clients synchronously
+    let nextClients=[...clients];
+    importRows.forEach(r=>{
+      if(r.clientName && !nextClients.some(c=>c.name.toLowerCase()===r.clientName.toLowerCase())){
+        nextClients.push({id:'imp_'+uid(),name:r.clientName,defaultFreq:'none'});
+      }
+    });
+
+    // 3. Resolve/auto-create task types, with group already resolved to an id
+    let nextDefs=[...taskDefs];
+    importRows.forEach(r=>{
+      if(!nextDefs.some(t=>t.label.toLowerCase()===r.taskLabel.toLowerCase())){
+        const grpMatch = r.workCategory ? nextGroups.find(g=>g.label.toLowerCase()===r.workCategory.toLowerCase()) : null;
+        nextDefs.push({
+          id:'imp_'+uid(),
+          label:r.taskLabel,
+          group: grpMatch ? grpMatch.id : (nextGroups[0]?nextGroups[0].id:'gst'),
+          bucket: r.bucket,
+          isCompliance:false
+        });
+      }
+    });
+
+    // 4. Build the new ct rows, resolving client/task names to ids against the (possibly just-extended) lists
+    let nextCt=[...ct];
+    importRows.forEach(r=>{
+      const cdef = r.clientName ? nextClients.find(c=>c.name.toLowerCase()===r.clientName.toLowerCase()) : null;
+      const tdef = nextDefs.find(t=>t.label.toLowerCase()===r.taskLabel.toLowerCase());
+      if(!tdef) return;
+      const cid = cdef ? cdef.id : null;
+      const newRowData={
+        tid:tdef.id, cid, period:r.period, due:r.due, prep:r.prep||'RK', rev:r.rev||'RK',
+        pi: TEAM.find(t=>t.id===r.prep)?TEAM.find(t=>t.id===r.prep).idx:0,
+        ri: TEAM.find(t=>t.id===r.rev)?TEAM.find(t=>t.id===r.rev).idx:0,
+        status:r.status, od:false, freq:r.freq,
+        filedDate:r.filedDate||undefined, ackNo:r.ackNo||undefined,
+        fy:r.fy||undefined, ref1:r.ref1||undefined, ref2:r.ref2||undefined, ref3:r.ref3||undefined
+      };
+      if(mode==='replace'){
+        const idx=nextCt.findIndex(x=>x.cid===cid && x.tid===tdef.id && x.period===r.period);
+        if(idx>=0){ nextCt[idx]={...nextCt[idx],...newRowData}; return; }
+      }
+      nextCt.push({id:uid(),...newRowData,st:[]});
+    });
+
+    // 5. Commit all at once
+    setGroups(nextGroups);
+    setClients(nextClients);
+    setTaskDefs(nextDefs);
+    setCt(nextCt);
+  };
+
+  const sbItem=(v,label)=>e('div',{key:v,onClick:()=>goView(v),style:{display:'flex',alignItems:'center',gap:7,padding:'6px 12px',fontSize:12,color:view===v?'#534AB7':'var(--color-text-secondary)',cursor:'pointer',borderLeft:view===v?'2px solid #534AB7':'2px solid transparent',fontWeight:view===v?500:400,background:view===v?'var(--color-background-primary)':'transparent'}},label);
+
+  const BcPart=(label,onClick)=>onClick
+    ? e(React.Fragment,{key:label},e('span',{onClick,style:{color:'var(--color-text-tertiary)',cursor:'pointer',fontSize:12}},label),e('span',{style:{color:'var(--color-text-tertiary)',fontSize:10,margin:'0 4px'}},'›'))
+    : e('span',{key:label,style:{color:'var(--color-text-primary)',fontWeight:500,fontSize:12}},label);
+
+  const ClientRows=(rows,tidKey,labelMode)=>{
+    labelMode = labelMode || 'client'; // 'client' = show client name (task-first view); 'task' = show task name (client-first view)
+    return e('div',{style:{border:'0.5px solid #534AB7',borderTop:'none',borderBottomLeftRadius:'var(--border-radius-md)',borderBottomRightRadius:'var(--border-radius-md)',marginBottom:3,background:'var(--color-background-primary)'}},
+    e('div',{style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,padding:'4px 10px',borderBottom:'0.5px solid var(--color-border-tertiary)',background:'#EEEDFE'}},
+      e('div'),e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},labelMode==='task'?'Task':'Client'),
+      e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},'Period'),
+      e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},'Due'),
+      e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},'Team'),
+      e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},'Status'),e('div')
+    ),
+    rows.map(r=>{
+      const cdef=clients.find(c=>c.id===r.cid);
+      const tdef=taskDefs.find(t=>t.id===r.tid);
+      const k=tidKey+'_'+r.id;
+      const open=expCl===k;
+      const isDraftOpen=nextOccurDraft && nextOccurDraft.rowId===r.id;
+      const samePerson = r.prep===r.rev;
+      return e('div',{key:k},
+        e('div',{onClick:()=>setExpCl(open?null:k),style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,alignItems:'center',padding:'7px 10px',borderBottom:'0.5px solid var(--color-border-tertiary)',cursor:'pointer',background:open?'#F7F6FE':'var(--color-background-primary)'}},
+          e(Chk,{state:r.status==='done'?'done':r.status==='review'?'review':r.status==='approved'?'approved':'pending',onClick:()=>{
+            const isPreparer=r.prep===CURRENT_USER;
+            const isReviewer=r.rev===CURRENT_USER;
+            const samePerson=r.prep===r.rev;
+            if(samePerson){ advanceStatus(r.id,'preparer'); return; }
+            if(isPreparer){ advanceStatus(r.id,'preparer'); return; }
+            if(isReviewer){ advanceStatus(r.id,'reviewer'); return; }
+          }}),
+          labelMode==='task'
+            ? e('div',{style:{fontSize:12,color:'var(--color-text-primary)',display:'flex',alignItems:'center',gap:4}},
+                e('span',null,tdef?tdef.label:r.tid),
+                r.isPrivate?e('span',{title:'Private task — only you can see this',style:{fontSize:9,marginLeft:4,padding:'1px 5px',background:'#EEEDFE',color:'#534AB7',borderRadius:10}},'🔒'):null,
+                r.closedWithoutReview?e('i',{className:'ti ti-shield-x',title:'Closed without review',style:{fontSize:10,color:'#D85A30'},'aria-label':'Closed without review'}):null
+              )
+            : e('div',{style:{fontSize:12,color:'var(--color-text-primary)',display:'flex',alignItems:'center',gap:4}},
+                r.cid ? e('span',{title:'Double-click to open client view',onDoubleClick:ev=>{ev.stopPropagation();goClient(r.cid);},onClick:ev=>ev.stopPropagation(),style:{color:'#534AB7',cursor:'pointer',borderBottom:'1px dashed #AFA9EC'}},cdef?cdef.name:r.cid)
+                  : e('span',{style:{color:'var(--color-text-tertiary)',fontStyle:'italic',fontSize:11}},'Internal task'),
+                r.closedWithoutReview?e('i',{className:'ti ti-shield-x',title:'Closed without review',style:{fontSize:10,color:'#D85A30'},'aria-label':'Closed without review'}):null
+              ),
+          e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},
+            r.period||'—',
+            tdef&&tdef.bucket==='assessment'&&r.fy ? e('span',{style:{marginLeft:4,fontSize:9,padding:'1px 5px',borderRadius:10,background:'#EEEDFE',color:'#534AB7'}},r.fy) : null
+          ),
+          e('div',{style:{fontSize:10,color:r.od?'#993C1D':'var(--color-text-tertiary)',whiteSpace:'nowrap'}},r.due),
+          e('div',{style:{display:'flex',gap:2}},e(Av,{idx:r.pi,label:r.prep}),e(Av,{idx:r.ri,label:r.rev})),
+          e(St,{status:r.status}),
+          e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},open?'▲':'▼')
+        ),
+        open?e('div',null,
+          (()=>{
+            const isPreparer = r.prep===CURRENT_USER;
+            const isReviewer = r.rev===CURRENT_USER;
+            if(samePerson){
+              // Same person — one-step close
+              return e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+                e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'You are both preparer and reviewer.'),
+                r.status==='pending' ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-check','aria-hidden':'true'}),'Close') : null,
+                r.status==='done' ? e(Btn,{onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-corner-up-left','aria-hidden':'true'}),'Reopen') : null
+              );
+            }
+            return e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+              e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Preparer: '+r.prep+' · Reviewer: '+r.rev),
+              // --- PREPARER ACTIONS ---
+              isPreparer && r.status==='pending'
+                ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-arrow-right','aria-hidden':'true'}),'Submit for review') : null,
+              isPreparer && r.status==='review'
+                ? e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)',fontStyle:'italic'}},'Awaiting reviewer approval…') : null,
+              isPreparer && r.status==='approved'
+                ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-file-check','aria-hidden':'true'}),'Mark as filed') : null,
+              isPreparer && r.status==='review'
+                ? e(Btn,{onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-corner-up-left','aria-hidden':'true'}),'Undo submission') : null,
+              // --- REVIEWER ACTIONS ---
+              isReviewer && r.status==='pending'
+                ? e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)',fontStyle:'italic'}},'Awaiting preparer submission…') : null,
+              isReviewer && r.status==='review'
+                ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'reviewer')},e('i',{className:'ti ti-circle-check','aria-hidden':'true'}),'Approve') : null,
+              isReviewer && r.status==='review'
+                ? e(Btn,{onClick:()=>approveAndFile(r.id),style:{borderColor:'#0F6E56',color:'#0F6E56'}},e('i',{className:'ti ti-file-check','aria-hidden':'true'}),'Approve & file') : null,
+              isReviewer && r.status==='review'
+                ? e(Btn,{onClick:()=>resignToPreparer(r.id,prompt('Note for '+r.prep+' (optional):')||'')},e('i',{className:'ti ti-corner-up-left','aria-hidden':'true'}),'Send back') : null,
+              isReviewer && r.status==='approved'
+                ? e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)',fontStyle:'italic'}},'Approved — awaiting '+r.prep+' to file…') : null,
+              isReviewer && r.status==='approved'
+                ? e(Btn,{onClick:()=>advanceStatus(r.id,'reviewer')},e('i',{className:'ti ti-corner-up-left','aria-hidden':'true'}),'Withdraw approval') : null,
+              // --- ADMIN OVERRIDE (current user is neither preparer nor reviewer) ---
+              !isPreparer && !isReviewer
+                ? e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)',fontStyle:'italic'}},'You are not the preparer or reviewer on this task.') : null,
+              // --- REOPEN (anyone) ---
+              r.status==='done' && (isPreparer||isReviewer)
+                ? e(Btn,{onClick:()=>advanceStatus(r.id,isPreparer?'preparer':'reviewer')},e('i',{className:'ti ti-corner-up-left','aria-hidden':'true'}),'Reopen') : null,
+              // --- Close without approval (reviewer only, any non-done state) ---
+              isReviewer && r.status!=='done'
+                ? e(Btn,{onClick:()=>{ if(confirm('Close without approval? This will be flagged.')) closeWithoutReview(r.id); },style:{borderColor:'#993C1D',color:'#993C1D',marginLeft:'auto'}},e('i',{className:'ti ti-shield-x','aria-hidden':'true'}),'Close without approval') : null
+            );
+          })(),
+          r.resignNote ? e('div',{style:{padding:'6px 10px',fontSize:10,color:'#712B13',background:'#FAECE7',borderBottom:'0.5px solid #F0997B'}},e('i',{className:'ti ti-corner-up-left',style:{marginRight:4},'aria-hidden':'true'}),'Sent back to preparer: '+r.resignNote) : null,
+          r.closedWithoutReview ? e('div',{style:{padding:'6px 10px',fontSize:10,color:'#712B13',background:'#FAECE7',borderBottom:'0.5px solid #F0997B'}},e('i',{className:'ti ti-shield-x',style:{marginRight:4},'aria-hidden':'true'}),'Closed without reviewer approval.') : null,
+          tdef && tdef.bucket==='assessment' ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+            e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}},
+              e('div',{style:{fontSize:9,fontWeight:500,color:'#534AB7',letterSpacing:'.04em',textTransform:'uppercase'}},'Assessment details'),
+              r.status==='done'?e('span',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},'Read-only after closing — edit to update'):null
+            ),
+            e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}},
+              e('div',null,
+                e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:2}},'FY'),
+                e('select',{value:r.fy||'',onChange:ev=>updateRowFilingInfo(r.id,{fy:ev.target.value}),style:{fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:'100%'}},
+                  [e('option',{key:'',value:''},'— FY —'),...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f))]
+                )
+              ),
+              e('div',null,
+                e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:2}},refLabels.ref1),
+                e('input',{value:r.ref1||'',placeholder:'—',onChange:ev=>updateRowFilingInfo(r.id,{ref1:ev.target.value}),style:{fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:'100%'}})
+              ),
+              e('div',null,
+                e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:2}},refLabels.ref2),
+                e('input',{value:r.ref2||'',placeholder:'—',onChange:ev=>updateRowFilingInfo(r.id,{ref2:ev.target.value}),style:{fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:'100%'}})
+              ),
+              e('div',null,
+                e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:2}},refLabels.ref3),
+                e('input',{value:r.ref3||'',placeholder:'—',onChange:ev=>updateRowFilingInfo(r.id,{ref3:ev.target.value}),style:{fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:'100%'}})
+              )
+            )
+          ) : null,
+          tdef && tdef.isCompliance ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+            e('div',{style:{fontSize:9,fontWeight:500,color:'#534AB7',letterSpacing:'.04em',textTransform:'uppercase',marginBottom:6}},'Filing record'),
+            e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}},
+              e('div',null,
+                e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:2}},'Filed date'),
+                e('input',{value:r.filedDate||'',placeholder:'e.g. 20 Jun',onChange:ev=>updateRowFilingInfo(r.id,{filedDate:ev.target.value}),style:{fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:'100%'}})
+              ),
+              e('div',null,
+                e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:2}},'Acknowledgement number'),
+                e('input',{value:r.ackNo||'',placeholder:'Ack. no.',onChange:ev=>updateRowFilingInfo(r.id,{ackNo:ev.target.value}),style:{fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:'100%'}})
+              )
+            ),
+            r.filedDate ? e('div',{style:{fontSize:9,color:'#27500A',marginTop:5}},'✓ Filed on '+r.filedDate+(r.ackNo?' · Ack: '+r.ackNo:'')) :
+              e('div',{style:{fontSize:9,color:'#993C1D',marginTop:5}},'Not yet filed — fill in date and ack number after submission.')
+          ) : null,
+          e(SubPanel,{r,onToggleSub:toggleSub,onAddSub:addSub}),
+          r.cid && r.freq && r.freq!=='none' ? e('div',{style:{padding:'8px 10px 8px 34px',borderTop:'0.5px dashed #AFA9EC',background:'#F7F6FE'}},
+            isDraftOpen ? e('div',{style:{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}},
+              e('span',{style:{fontSize:10,color:'var(--color-text-secondary)'}},'New period:'),
+              e('input',{value:nextOccurDraft.period,onChange:ev=>setNextOccurDraft(d=>({...d,period:ev.target.value})),style:{fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:90}}),
+              e('span',{style:{fontSize:10,color:'var(--color-text-secondary)'}},'Due:'),
+              e('input',{value:nextOccurDraft.due,onChange:ev=>setNextOccurDraft(d=>({...d,due:ev.target.value})),style:{fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:70}}),
+              e(Btn,{pri:true,onClick:confirmNextOccurrence},'Create'),
+              e(Btn,{onClick:()=>setNextOccurDraft(null)},'Cancel')
+            ) : e(Btn,{onClick:()=>startNextOccurrence(r)},e('i',{className:'ti ti-repeat','aria-hidden':'true'}),'+ Next occurrence ('+r.freq+')')
+          ) : null
+        ):null
+      );
+    })
+  );
+  };
+
+  const TaskRow=td=>{
+    const allRows=ct.filter(x=>x.tid===td.id);
+    const filtered=filtForTask(allRows,td);
+    if(!allRows.length) return null;
+    const open=expTask===td.id;
+    const st={total:filtered.length,done:filtered.filter(x=>x.status==='done').length,pending:filtered.filter(x=>x.status==='pending').length,review:filtered.filter(x=>x.status==='review').length};
+    const pct=st.total?Math.round(st.done/st.total*100):0;
+    const f=getTaskFilter(td);
+    const hasOverride=!!taskOverrides[td.id];
+    return e('div',{key:td.id},
+      e('div',{onClick:()=>setExpTask(open?null:td.id),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',marginBottom:3,cursor:'pointer',background:open?'#EEEDFE':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
+        e('span',{style:{fontSize:11,color:'var(--color-text-tertiary)'}},open?'▲':'▼'),
+        e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:'var(--color-text-primary)',minWidth:120}},td.label,hasOverride?e('span',{style:{fontSize:9,color:'#534AB7',marginLeft:6,fontWeight:400}},'(custom filter)'):null),
+        open?e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch)}):e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
+          e(Pill,{k:'t'},st.total+' clients'),
+          st.done>0?e(Pill,{k:'d'},st.done+' done'):null,
+          st.review>0?e(Pill,{k:'r'},st.review+' review'):null,
+          st.pending>0?e(Pill,{k:'p'},st.pending+' pending'):null
+        ),
+        hasOverride?e('span',{onClick:ev=>{ev.stopPropagation();clearTaskOverride(td.id);},style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',textDecoration:'underline',whiteSpace:'nowrap'}},'reset'):null,
+        e('button',{onClick:ev=>{ev.stopPropagation();setBulkCreateTask(td);},title:'Create '+td.label+' for all clients in one go',style:{fontSize:9,padding:'3px 8px',border:'0.5px solid #AFA9EC',borderRadius:'var(--border-radius-md)',background:'#EEEDFE',color:'#534AB7',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:3,whiteSpace:'nowrap'}},
+          e('i',{className:'ti ti-stack-2','aria-hidden':'true'}),'Create for all clients'),
+        e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',whiteSpace:'nowrap'}},pct+'%')
+      ),
+      open?ClientRows(filtered,td.id):null
+    );
+  };
+
+  const GroupedTasks=tdList=>e(React.Fragment,null,groups.map(g=>{
+    const gt=tdList.filter(t=>t.group===g.id);
+    if(!gt.some(t=>ct.some(x=>x.tid===t.id))) return null;
+    return e('div',{key:g.id},
+      e('div',{style:{display:'flex',alignItems:'center',gap:6,padding:'5px 0 4px',borderBottom:'0.5px solid var(--color-border-tertiary)',marginBottom:5,marginTop:10}},
+        e('span',{style:{fontSize:11,fontWeight:500,color:'var(--color-text-secondary)'}},g.label)),
+      gt.map(TaskRow)
+    );
+  }));
+
+  const ClientsView=()=>{
+    const list = focusClient ? clients.filter(c=>c.id===focusClient) : clients;
+    return e(React.Fragment,null,
+      focusClient?e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:10}},
+        e('button',{onClick:()=>{setFocusClient(null);setExpCC(null);},style:{fontSize:11,padding:'4px 10px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'transparent',color:'var(--color-text-secondary)',cursor:'pointer'}},'← All clients'),
+        e('span',{style:{fontSize:13,fontWeight:500,color:'var(--color-text-primary)'}},(clients.find(c=>c.id===focusClient)||{}).name)
+      ):null,
+      e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:10}},'Each task type below keeps its own period default (set on the Dashboard, or overridden here). Expand a client, then a task, to adjust its filter or view subtasks.'),
+      list.map((cl,ci)=>{
+        const myRowsAll=ct.filter(x=>x.cid===cl.id);
+        if(!myRowsAll.length && !focusClient) return null;
+        const isOpen=expCC===cl.id;
+        // group this client's rows by task type, apply each task type's own filter (bucket default or override)
+        const tidsForClient=[...new Set(myRowsAll.map(x=>x.tid))];
+        const visibleRowsByTask={};
+        tidsForClient.forEach(tid=>{
+          const td=taskDefs.find(t=>t.id===tid);
+          if(!td) return;
+          const rowsForTid=myRowsAll.filter(x=>x.tid===tid);
+          visibleRowsByTask[tid]=filtForTask(rowsForTid,td);
+        });
+        const visibleRows=Object.values(visibleRowsByTask).flat();
+        const done=visibleRows.filter(x=>x.status==='done').length;
+        const pending=visibleRows.filter(x=>x.status==='pending'||x.status==='review').length;
+        return e('div',{key:cl.id,style:{border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',marginBottom:6,background:'var(--color-background-primary)'}},
+          e('div',{onClick:()=>setExpCC(isOpen?null:cl.id),style:{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',cursor:'pointer',borderBottom:isOpen?'0.5px solid var(--color-border-tertiary)':'none',flexWrap:'wrap',rowGap:6}},
+            e(Av,{idx:ci,label:initials(cl.name),size:26}),
+            e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:'var(--color-text-primary)',minWidth:100}},cl.name),
+            e(Pill,{k:'t'},visibleRows.length+' tasks'),
+            done>0?e(Pill,{k:'d'},done+' done'):null,
+            pending>0?e(Pill,{k:'p'},pending+' pending'):null,
+            e('span',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginLeft:6}},isOpen?'▲':'▼')
+          ),
+          isOpen ? e('div',null,
+            tidsForClient.length===0 ? e('div',{style:{padding:24,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No tasks.') :
+            e('div',{style:{padding:'8px 12px'}}, tidsForClient.map(tid=>{
+              const td=taskDefs.find(t=>t.id===tid);
+              if(!td) return null;
+              const rows=visibleRowsByTask[tid]||[];
+              const f=getTaskFilter(td);
+              const hasOverride=!!taskOverrides[td.id];
+              const allRowsForTid=myRowsAll.filter(x=>x.tid===tid);
+              const currentFreq = allRowsForTid.length ? (allRowsForTid[0].freq||'none') : 'none';
+              const freqMixed = allRowsForTid.some(x=>(x.freq||'none')!==currentFreq);
+              return e('div',{key:tid,style:{marginBottom:12}},
+                e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}},
+                  e('span',{style:{fontSize:12,fontWeight:500,color:'var(--color-text-primary)'}},td.label),
+                  hasOverride?e('span',{style:{fontSize:9,color:'#534AB7'}},'(custom filter)'):null,
+                  e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch)}),
+                  hasOverride?e('span',{onClick:()=>clearTaskOverride(td.id),style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',textDecoration:'underline'}},'reset'):null,
+                  e('div',{style:{display:'flex',alignItems:'center',gap:4,marginLeft:'auto'}},
+                    e('span',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},'Recurrence:'),
+                    e('select',{value:freqMixed?'mixed':currentFreq,onChange:ev=>updateFreqForClientTask(cl.id,tid,ev.target.value),style:{fontSize:10,padding:'2px 5px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)'}},
+                      [freqMixed?e('option',{key:'mixed',value:'mixed',disabled:true},'Mixed'):null,...FREQUENCIES.map(fr=>e('option',{key:fr.id,value:fr.id},fr.label))]
+                    )
+                  )
+                ),
+                rows.length===0 ? e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',padding:'6px 0'}},'No matching tasks for this filter.') :
+                  ClientRows(rows,'cc_'+cl.id+'_'+tid,'task')
+              );
+            }))
+          ) : null
+        );
+      })
+    );
+  };
+
+  const TeamView=member=>{
+    const myRowsAll=ct.filter(x=>x.rev===member.id||x.prep===member.id);
+    const myRows=myRowsAll.filter(x=>{
+      if(!periodMatchesFilter(x.period, teamFilter)) return false;
+      if((teamFilter.status||'all')!=='all' && x.status!==teamFilter.status) return false;
+      return true;
+    });
+    return e(React.Fragment,null,
+      e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:12,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap'}},
+        e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Filter:'),
+        e(MiniFilterBar,{filter:teamFilter,onChange:patch=>setTeamFilter(f=>({...f,...patch}))})
+      ),
+      myRows.length===0 ? e('div',{style:{padding:24,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No tasks match this filter.') :
+      e('div',null,[...new Set(myRows.map(x=>x.tid))].map(tid=>{
+        const td=taskDefs.find(t=>t.id===tid);
+        if(!td) return null;
+        const rowsForTask=myRows.filter(x=>x.tid===tid);
+        const sectionKey='team_'+member.id+'_'+tid;
+        const open=expTask===sectionKey;
+        const done=rowsForTask.filter(x=>x.status==='done').length;
+        const review=rowsForTask.filter(x=>x.status==='review').length;
+        const pending=rowsForTask.filter(x=>x.status==='pending').length;
+        return e('div',{key:tid,style:{marginBottom:6}},
+          e('div',{onClick:()=>setExpTask(open?null:sectionKey),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',cursor:'pointer',background:open?'#EEEDFE':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
+            e('span',{style:{fontSize:11,color:'var(--color-text-tertiary)'}},open?'▲':'▼'),
+            e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:'var(--color-text-primary)',minWidth:120}},td.label),
+            e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
+              e(Pill,{k:'t'},rowsForTask.length+' tasks'),
+              done>0?e(Pill,{k:'d'},done+' done'):null,
+              review>0?e(Pill,{k:'r'},review+' review'):null,
+              pending>0?e(Pill,{k:'p'},pending+' pending'):null
+            )
+          ),
+          open ? ClientRows(rowsForTask,tid+'_team_'+member.id) : null
+        );
+      }))
+    );
+  };
+
+  // ----- COMPLIANCE HISTORY VIEW -----
+  // ----- ASSESSMENT TRACKING VIEW -----
+  const AssessmentView=()=>{
+    const assessmentTaskDefs=taskDefs.filter(t=>t.bucket==='assessment');
+    const allRows=ct.filter(r=>{const td=taskDefs.find(t=>t.id===r.tid); return td && td.bucket==='assessment';});
+    // Use full FY list; add any extra values from actual data not already in the list
+    const extraFYs=[...new Set(allRows.map(r=>r.fy).filter(f=>f&&!FY_OPTIONS.includes(f)))];
+    const fyOptions=[...FY_OPTIONS,...extraFYs];
+    const [hideDone,setHideDone]=[assessmentHideDone, setAssessmentHideDone];
+
+    let rows=hideDone ? allRows.filter(r=>r.status!=='done') : allRows;
+    if(assessmentFYFilter!=='all') rows=rows.filter(r=>r.fy===assessmentFYFilter);
+    if(assessmentRefFilter.query.trim()){
+      const q=assessmentRefFilter.query.trim().toLowerCase();
+      const field=assessmentRefFilter.field;
+      rows=rows.filter(r=>{
+        if(field==='all') return [r.ref1,r.ref2,r.ref3].some(v=>(v||'').toLowerCase().includes(q));
+        return (r[field]||'').toLowerCase().includes(q);
+      });
+    }
+
+    const inputSmall={fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:'100%',outline:'none',background:'var(--color-background-primary)',color:'var(--color-text-primary)'};
+
+    return e(React.Fragment,null,
+      e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap'}},
+        e('label',{style:{fontSize:10,color:'var(--color-text-secondary)',display:'flex',alignItems:'center',gap:4,cursor:'pointer'}},
+          e('input',{type:'checkbox',checked:hideDone,onChange:ev=>setHideDone(ev.target.checked),style:{margin:0}}),
+          'Hide done (closed) tasks'
+        ),
+        e('div',{style:{width:'0.5px',height:16,background:'var(--color-border-tertiary)'}}),
+        e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'FY:'),
+        e('select',{value:assessmentFYFilter,onChange:ev=>setAssessmentFYFilter(ev.target.value),style:{fontSize:11,padding:'3px 7px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',cursor:'pointer'}},
+          [e('option',{key:'all',value:'all'},'All years'),...fyOptions.map(fy=>e('option',{key:fy,value:fy},fy))]
+        ),
+        e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Search:'),
+        e('select',{value:assessmentRefFilter.field,onChange:ev=>setAssessmentRefFilter(f=>({...f,field:ev.target.value})),style:{fontSize:11,padding:'3px 7px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',cursor:'pointer'}},
+          [e('option',{key:'all',value:'all'},'All reference fields'),e('option',{key:'ref1',value:'ref1'},refLabels.ref1),e('option',{key:'ref2',value:'ref2'},refLabels.ref2),e('option',{key:'ref3',value:'ref3'},refLabels.ref3)]
+        ),
+        e('input',{placeholder:'Search value…',value:assessmentRefFilter.query,onChange:ev=>setAssessmentRefFilter(f=>({...f,query:ev.target.value})),style:{fontSize:11,padding:'3px 7px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:140}})
+      ),
+
+      e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:10,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
+        e('span',null,'Reference field labels:'),
+        ['ref1','ref2','ref3'].map(k=>e('input',{key:k,value:refLabels[k],onChange:ev=>setRefLabels(prev=>({...prev,[k]:ev.target.value})),style:{fontSize:10,padding:'2px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:110}}))
+      ),
+
+      rows.length===0 ? e('div',{style:{padding:24,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No assessment tasks match this filter.') :
+      e('div',{style:{border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',overflow:'hidden'}},
+        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 56px 70px 1fr 1fr 1fr 70px',gap:8,padding:'6px 10px',background:'#EEEDFE',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},
+          e('div',null,'Client'),e('div',null,'Task'),e('div',null,'FY'),e('div',null,'Due'),
+          e('div',null,refLabels.ref1),e('div',null,refLabels.ref2),e('div',null,refLabels.ref3),e('div',null,'Status')
+        ),
+        rows.map(r=>{
+          const cdef=clients.find(c=>c.id===r.cid);
+          const td=taskDefs.find(t=>t.id===r.tid);
+          return e('div',{key:r.id,style:{display:'grid',gridTemplateColumns:'1fr 1fr 56px 70px 1fr 1fr 1fr 70px',gap:8,alignItems:'center',padding:'6px 10px',borderTop:'0.5px solid var(--color-border-tertiary)'}},
+            e('div',{style:{fontSize:12,color:'var(--color-text-primary)'}},cdef?cdef.name:(r.cid||'—')),
+            e('div',{style:{fontSize:11,color:'var(--color-text-secondary)'}},td?td.label:r.tid),
+            e('select',{style:inputSmall,value:r.fy||'',onChange:ev=>updateRowFilingInfo(r.id,{fy:ev.target.value})},
+              [e('option',{key:'',value:''},'—'),...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f))]
+            ),
+            e('div',{style:{fontSize:11,color:r.od?'#993C1D':'var(--color-text-tertiary)'}},r.due),
+            e('input',{style:inputSmall,value:r.ref1||'',onChange:ev=>updateRowFilingInfo(r.id,{ref1:ev.target.value})}),
+            e('input',{style:inputSmall,value:r.ref2||'',onChange:ev=>updateRowFilingInfo(r.id,{ref2:ev.target.value})}),
+            e('input',{style:inputSmall,value:r.ref3||'',onChange:ev=>updateRowFilingInfo(r.id,{ref3:ev.target.value})}),
+            e(St,{status:r.status})
+          );
+        })
+      )
+    );
+  };
+
+  const ComplianceView=()=>{
+    const complianceTaskDefs=taskDefs.filter(t=>t.isCompliance);
+    const allRows=ct.filter(r=>{
+      const td=taskDefs.find(t=>t.id===r.tid);
+      return td && td.isCompliance;
+    });
+    const fyOptions=[...new Set(allRows.map(r=>periodToFY(r.period)).filter(Boolean))].sort();
+    const monthOptions=[...new Set(allRows.map(r=>periodToMonthLabel(r.period)).filter(Boolean))];
+
+    let rows=allRows;
+    if(complianceTypeFilter!=='all') rows=rows.filter(r=>r.tid===complianceTypeFilter);
+    if(complianceClientFilter!=='all') rows=rows.filter(r=>r.cid===complianceClientFilter);
+    if(complianceFY!=='all') rows=rows.filter(r=>periodToFY(r.period)===complianceFY);
+    if(complianceMonth!=='all') rows=rows.filter(r=>periodToMonthLabel(r.period)===complianceMonth);
+
+    const filedCount=rows.filter(r=>r.filedDate).length;
+    const pendingCount=rows.length-filedCount;
+    const closedWithoutReviewCount=rows.filter(r=>r.closedWithoutReview).length;
+
+    const inputSmall={fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:'100%',outline:'none',background:'var(--color-background-primary)',color:'var(--color-text-primary)'};
+
+    return e(React.Fragment,null,
+      e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:12,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap'}},
+        e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Client:'),
+        e('select',{value:complianceClientFilter,onChange:ev=>setComplianceClientFilter(ev.target.value),style:{fontSize:11,padding:'3px 7px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',cursor:'pointer'}},
+          [e('option',{key:'all',value:'all'},'All clients'),...clients.map(c=>e('option',{key:c.id,value:c.id},c.name))]
+        ),
+        e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Filing type:'),
+        e('select',{value:complianceTypeFilter,onChange:ev=>setComplianceTypeFilter(ev.target.value),style:{fontSize:11,padding:'3px 7px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',cursor:'pointer'}},
+          [e('option',{key:'all',value:'all'},'All filing types'),...complianceTaskDefs.map(td=>e('option',{key:td.id,value:td.id},td.label))]
+        ),
+        e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'FY:'),
+        e('select',{value:complianceFY,onChange:ev=>setComplianceFY(ev.target.value),style:{fontSize:11,padding:'3px 7px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',cursor:'pointer'}},
+          [e('option',{key:'all',value:'all'},'All years'),...fyOptions.map(fy=>e('option',{key:fy,value:fy},fy))]
+        ),
+        e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Month:'),
+        e('select',{value:complianceMonth,onChange:ev=>setComplianceMonth(ev.target.value),style:{fontSize:11,padding:'3px 7px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',cursor:'pointer'}},
+          [e('option',{key:'all',value:'all'},'All months'),...monthOptions.map(m=>e('option',{key:m,value:m},m))]
+        ),
+        e('span',{style:{fontSize:9,color:'var(--color-text-tertiary)',width:'100%'}},'Month filter only applies to monthly filings; quarterly/yearly filings are matched by FY.')
+      ),
+
+      e('div',{style:{display:'flex',gap:8,marginBottom:12}},
+        e('div',{style:{flex:1,background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',padding:'7px 10px'}},
+          e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'var(--color-text-tertiary)',marginBottom:3}},'Total filings'),
+          e('div',{style:{fontSize:19,fontWeight:500,color:'var(--color-text-primary)'}},rows.length)
+        ),
+        e('div',{style:{flex:1,background:'#EAF3DE',borderRadius:'var(--border-radius-md)',padding:'7px 10px'}},
+          e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#27500A',marginBottom:3}},'Filed'),
+          e('div',{style:{fontSize:19,fontWeight:500,color:'#27500A'}},filedCount)
+        ),
+        e('div',{style:{flex:1,background:'#FAECE7',borderRadius:'var(--border-radius-md)',padding:'7px 10px'}},
+          e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#993C1D',marginBottom:3}},'Not yet filed'),
+          e('div',{style:{fontSize:19,fontWeight:500,color:'#993C1D'}},pendingCount)
+        ),
+        e('div',{style:{flex:1,background:closedWithoutReviewCount>0?'#FAEEDA':'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',padding:'7px 10px'}},
+          e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:closedWithoutReviewCount>0?'#633806':'var(--color-text-tertiary)',marginBottom:3}},'Closed without review'),
+          e('div',{style:{fontSize:19,fontWeight:500,color:closedWithoutReviewCount>0?'#633806':'var(--color-text-primary)'}},closedWithoutReviewCount)
+        )
+      ),
+
+      rows.length===0 ? e('div',{style:{padding:24,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No compliance filings match this filter.') :
+      e('div',{style:{border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',overflow:'hidden'}},
+        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 110px 80px 70px 90px 130px 80px',gap:8,padding:'6px 10px',background:'#EEEDFE',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},
+          e('div',null,'Client'),e('div',null,'Filing'),e('div',null,'Period'),e('div',null,'Due'),e('div',null,'Filed date'),e('div',null,'Ack. number'),e('div',null,'Status')
+        ),
+        rows.sort((a,b)=>(a.cid||'').localeCompare(b.cid||'')).map(r=>{
+          const cdef=clients.find(c=>c.id===r.cid);
+          const td=taskDefs.find(t=>t.id===r.tid);
+          const filed=!!r.filedDate;
+          return e('div',{key:r.id,style:{display:'grid',gridTemplateColumns:'1fr 110px 80px 70px 90px 130px 80px',gap:8,alignItems:'center',padding:'6px 10px',borderTop:'0.5px solid var(--color-border-tertiary)',background:r.closedWithoutReview?'#FAEEDA':'transparent'}},
+            e('div',{style:{fontSize:12,color:'var(--color-text-primary)',display:'flex',alignItems:'center',gap:4}},
+              cdef?cdef.name:(r.cid||'—'),
+              r.closedWithoutReview?e('i',{className:'ti ti-shield-x',title:'Closed without reviewer sign-off',style:{fontSize:11,color:'#D85A30'},'aria-label':'Closed without review'}):null
+            ),
+            e('div',{style:{fontSize:11,color:'var(--color-text-secondary)'}},td?td.label:r.tid),
+            e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)'}},r.period||'—'),
+            e('div',{style:{fontSize:11,color:r.od?'#993C1D':'var(--color-text-tertiary)'}},r.due),
+            e('input',{style:inputSmall,placeholder:'dd Mon',value:r.filedDate||'',onChange:ev=>updateRowFilingInfo(r.id,{filedDate:ev.target.value})}),
+            e('input',{style:inputSmall,placeholder:'Ack. no.',value:r.ackNo||'',onChange:ev=>updateRowFilingInfo(r.id,{ackNo:ev.target.value})}),
+            e('span',{style:{fontSize:9,padding:'2px 7px',borderRadius:20,background:filed?'#EAF3DE':'#FAEEDA',color:filed?'#27500A':'#633806',textAlign:'center',whiteSpace:'nowrap'}},filed?'Filed':'Pending')
+          );
+        })
+      ),
+
+      e('div',{style:{marginTop:14,paddingTop:12,borderTop:'0.5px solid var(--color-border-tertiary)'}},
+        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:6}},'Which task types count as a tracked compliance filing:'),
+        e('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},
+          taskDefs.map(td=>e('label',{key:td.id,style:{fontSize:10,display:'flex',alignItems:'center',gap:4,padding:'3px 8px',border:'0.5px solid var(--color-border-tertiary)',borderRadius:20,cursor:'pointer',color:td.isCompliance?'#534AB7':'var(--color-text-secondary)',background:td.isCompliance?'#EEEDFE':'transparent'}},
+            e('input',{type:'checkbox',checked:!!td.isCompliance,onChange:()=>toggleTaskCompliance(td.id),style:{margin:0}}),
+            td.label
+          ))
+        )
+      )
+    );
+  };
+
+  // Mirrors renderContent's active filters to determine what's "on screen" right now, for export.
+  const getVisibleRows=()=>{
+    if(view==='assessment'){
+      let rows=ct.filter(r=>{const td=taskDefs.find(t=>t.id===r.tid); return td && td.bucket==='assessment';});
+      if(assessmentFYFilter!=='all') rows=rows.filter(r=>r.fy===assessmentFYFilter);
+      if(assessmentRefFilter.query.trim()){
+        const q=assessmentRefFilter.query.trim().toLowerCase();
+        const field=assessmentRefFilter.field;
+        rows=rows.filter(r=>{
+          if(field==='all') return [r.ref1,r.ref2,r.ref3].some(v=>(v||'').toLowerCase().includes(q));
+          return (r[field]||'').toLowerCase().includes(q);
+        });
+      }
+      return rows;
+    }
+    if(view==='compliance'){
+      let rows=ct.filter(r=>{ const td=taskDefs.find(t=>t.id===r.tid); return td && td.isCompliance; });
+      if(complianceTypeFilter!=='all') rows=rows.filter(r=>r.tid===complianceTypeFilter);
+      if(complianceClientFilter!=='all') rows=rows.filter(r=>r.cid===complianceClientFilter);
+      if(complianceFY!=='all') rows=rows.filter(r=>periodToFY(r.period)===complianceFY);
+      if(complianceMonth!=='all') rows=rows.filter(r=>periodToMonthLabel(r.period)===complianceMonth);
+      return rows;
+    }
+    if(view==='clients'){
+      const relevantClients = focusClient ? clients.filter(c=>c.id===focusClient) : clients;
+      const cids=relevantClients.map(c=>c.id);
+      return ct.filter(r=>cids.includes(r.cid)).filter(r=>{
+        const td=taskDefs.find(t=>t.id===r.tid);
+        if(!td) return true;
+        return filtForTask([r],td).length>0;
+      });
+    }
+    if(view==='dashboard'){
+      const tdList= bucket ? taskDefs.filter(t=>t.bucket===bucket) : taskDefs;
+      const tids=tdList.map(t=>t.id);
+      return ct.filter(r=>tids.includes(r.tid)).filter(r=>{
+        const td=taskDefs.find(t=>t.id===r.tid);
+        if(!td) return true;
+        return filtForTask([r],td).length>0;
+      });
+    }
+    const groupMatch=groups.find(g=>g.id===view);
+    if(groupMatch){
+      const tids=taskDefs.filter(t=>t.group===view).map(t=>t.id);
+      return ct.filter(r=>tids.includes(r.tid));
+    }
+    const teamMap2={raj:'RK',priya:'PK',aman:'AM'};
+    if(teamMap2[view]){
+      const mid=teamMap2[view];
+      return ct.filter(x=>x.rev===mid||x.prep===mid).filter(x=>{
+        if(!periodMatchesFilter(x.period, teamFilter)) return false;
+        if((teamFilter.status||'all')!=='all' && x.status!==teamFilter.status) return false;
+        return true;
+      });
+    }
+    return ct;
+  };
+
+  const handleExportVisible=()=>exportToExcel(getVisibleRows(), taskDefs, clients, groups, 'worktrack_visible_'+Date.now()+'.xlsx');
+  const handleExportAll=()=>exportToExcel(ct, taskDefs, clients, groups, 'worktrack_all_'+Date.now()+'.xlsx');
+
+  const renderContent=()=>{
+    if(view==='assessment'){
+      return e(React.Fragment,null,
+        e('div',{style:{display:'flex',alignItems:'center',gap:4,fontSize:12,marginBottom:8}},BcPart('Dashboard',()=>goView('dashboard')),BcPart('Assessment tracking')),
+        AssessmentView()
+      );
+    }
+    if(view==='compliance'){
+      return e(React.Fragment,null,
+        e('div',{style:{display:'flex',alignItems:'center',gap:4,fontSize:12,marginBottom:8}},BcPart('Dashboard',()=>goView('dashboard')),BcPart('Compliance history')),
+        ComplianceView()
+      );
+    }
+    if(view==='clients'){
+      const cd=focusClient?clients.find(c=>c.id===focusClient):null;
+      return e(React.Fragment,null,
+        e('div',{style:{display:'flex',alignItems:'center',gap:4,fontSize:12,flexWrap:'wrap',marginBottom:8}},
+          BcPart('Dashboard',()=>goView('dashboard')),
+          focusClient?e(React.Fragment,{key:'f'},BcPart('Clients',()=>{setFocusClient(null);setExpCC(null);}),BcPart(cd?cd.name:'')):BcPart('Clients')
+        ),
+        ClientsView()
+      );
+    }
+    if(view==='dashboard'){
+      const tdList=bucket?taskDefs.filter(t=>t.bucket===bucket):taskDefs;
+      const bi=bucket?BUCKETS.find(b=>b.id===bucket):null;
+      const s=bucket?bStats(bucket):null;
+      return e(React.Fragment,null,
+        e('div',{style:{display:'flex',alignItems:'center',gap:4,fontSize:12,marginBottom:8}},
+          bucket?e(React.Fragment,{key:'b'},BcPart('Dashboard',()=>setBucket(null)),BcPart(bi.label)):BcPart('Dashboard')
+        ),
+        bucket?e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap',gap:8}},
+          e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Default filter for all '+bi.label.toLowerCase()+' tasks (tasks can override below):'),
+          e(MiniFilterBar,{filter:bucketFilters[bucket],onChange:patch=>setBucketFilter(bucket,patch)})
+        ):null,
+        bucket&&s?e('div',{style:{display:'flex',gap:8,marginBottom:12}},
+          ['Total','Pending','Done'].map((lbl,i)=>e('div',{key:lbl,style:{flex:1,background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',padding:'7px 10px'}},
+            e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'var(--color-text-tertiary)',marginBottom:3}},lbl),
+            e('div',{style:{fontSize:19,fontWeight:500,color:i===1?'#993C1D':i===2?'#27500A':'var(--color-text-primary)'}},[s.total,s.pending,s.done][i])
+          ))
+        ):null,
+        !bucket?e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:14}},
+          BUCKETS.map(b=>{const s=bStats(b.id);return e('div',{key:b.id,onClick:()=>setBucket(b.id),style:{border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',padding:'10px 11px',cursor:'pointer'}},
+            e('div',{style:{fontSize:10,color:'var(--color-text-secondary)',marginBottom:4}},e('i',{className:'ti '+b.icon,style:{fontSize:10,marginRight:4},'aria-hidden':'true'}),b.label),
+            e('div',{style:{fontSize:22,fontWeight:500,color:'var(--color-text-primary)'}},s.total),
+            e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginTop:6}},(()=>{const bf=bucketFilters[b.id];const parts=[];if((bf.fy||'all')!=='all')parts.push(bf.fy);if((bf.quarter||'all')!=='all')parts.push(bf.quarter);if((bf.month||'all')!=='all')parts.push(bf.month);if((bf.status||'all')!=='all')parts.push(bf.status);return parts.length?'Filter: '+parts.join(' · '):'No filter set';})()),
+            e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginTop:5}},'Tap to drill down →')
+          );})
+        ):null,
+        GroupedTasks(tdList)
+      );
+    }
+    const vmap={};
+    groups.forEach(g=>{vmap[g.id]={label:g.label,td:taskDefs.filter(t=>t.group===g.id)};});
+    if(vmap[view]){
+      const vm=vmap[view];
+      return e(React.Fragment,null,
+        e('div',{style:{display:'flex',alignItems:'center',gap:4,fontSize:12,marginBottom:8}},BcPart('Dashboard',()=>goView('dashboard')),BcPart(vm.label)),
+        GroupedTasks(vm.td)
+      );
+    }
+    const teamMap={raj:TEAM[0],priya:TEAM[1],aman:TEAM[2]};
+    if(teamMap[view]){
+      const member=teamMap[view];
+      return e(React.Fragment,null,
+        e('div',{style:{display:'flex',alignItems:'center',gap:4,fontSize:12,marginBottom:8}},BcPart('Dashboard',()=>goView('dashboard')),BcPart(member.name+"'s tasks")),
+        TeamView(member)
+      );
+    }
+    return null;
+  };
+
+  return e(React.Fragment,null,
+  showAddModal ? e(AddTaskModal,{
+    taskDefs,clients,groups,ct,
+    onClose:()=>setShowAddModal(false),
+    onCreateTaskType:handleCreateTaskType,
+    onAddAssignment:handleAddAssignment,
+    onCreateGroup:handleCreateGroup
+  }) : null,
+  bulkCreateTask ? e(BulkCreateModal,{
+    taskDef:bulkCreateTask,
+    clients,ct,
+    onClose:()=>setBulkCreateTask(null),
+    onCreate:handleBulkCreate
+  }) : null,
+  showExcelModal ? e(ExcelImportModal,{
+    onClose:()=>setShowExcelModal(false),
+    onImport:handleExcelImport
+  }) : null,
+  closingPrompt ? (()=>{
+    const row=ct.find(r=>r.id===closingPrompt.rowId);
+    const taskDef=row?taskDefs.find(t=>t.id===row.tid)||{}:{};
+    return row ? e(ClosingPromptModal,{
+      row, taskDef, refLabels,
+      closeType:closingPrompt.closeType,
+      onConfirm:(details)=>finaliseClose(closingPrompt.rowId, closingPrompt.closeType, details),
+      onCancel:()=>setClosingPrompt(null)
+    }) : null;
+  })() : null,
+  e('div',{style:{display:'flex',height:680,border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-lg)',overflow:'hidden',background:'var(--color-background-primary)',fontFamily:'var(--font-sans)'}},
+    e('div',{style:{width:180,minWidth:180,borderRight:'0.5px solid var(--color-border-tertiary)',background:'var(--color-background-secondary)',display:'flex',flexDirection:'column',overflowY:'auto'}},
+      e('div',{style:{padding:'10px 12px',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+        e('div',{style:{fontSize:13,fontWeight:500,color:'var(--color-text-primary)'}},'WorkTrack'),
+        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},CONFIG.orgName+' · '+CURRENT_USER)
+      ),
+      e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Views'),
+      sbItem('dashboard','Dashboard'),sbItem('clients','Clients'),sbItem('compliance','Compliance history'),sbItem('assessment','Assessment tracking'),
+      e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Work type'),
+      ...groups.map(g=>sbItem(g.id,g.label)),
+      e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Team'),
+      sbItem('raj','Raj (you)'),sbItem('priya','Priya'),sbItem('aman','Aman'),
+      e('div',{style:{padding:'8px 12px',borderTop:'0.5px solid var(--color-border-tertiary)',marginTop:'auto'}},
+        e('div',{style:{display:'flex',alignItems:'center',gap:7}},
+          e(Av,{idx:0,label:(p.currentUser?p.currentUser.name:'RK').slice(0,2).toUpperCase(),size:24}),
+          e('div',{style:{flex:1}},
+            e('div',{style:{fontSize:11,fontWeight:500,color:'var(--color-text-primary)'}},p.currentUser?p.currentUser.name:'Raj Kumar'),
+            e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},p.currentUser&&p.currentUser.isReviewer?'Reviewer':'Preparer')
+          )
+        ),
+        e('button',{onClick:p.onSignOut,style:{marginTop:6,width:'100%',fontSize:10,padding:'4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'transparent',color:'var(--color-text-tertiary)',cursor:'pointer'}},'Sign out')
+      )
+    ),
+    e('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}},
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'flex-end',padding:'8px 14px',borderBottom:'0.5px solid var(--color-border-tertiary)',flexShrink:0,gap:8,flexWrap:'wrap'}},
+        e(Btn,{onClick:()=>setShowExcelModal(true)},e('i',{className:'ti ti-file-spreadsheet','aria-hidden':'true'}),'Import Excel'),
+        e(Btn,{onClick:handleExportVisible},e('i',{className:'ti ti-download','aria-hidden':'true'}),'Export visible'),
+        e(Btn,{onClick:handleExportAll},e('i',{className:'ti ti-download','aria-hidden':'true'}),'Export all'),
+        e(Btn,{pri:true,onClick:()=>setShowAddModal(true)},e('i',{className:'ti ti-plus','aria-hidden':'true'}),'Add task')
+      ),
+      e('div',{style:{flex:1,overflowY:'auto',padding:'12px 14px'}},renderContent())
+    )
+  )
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById('wt-root')).render(e(App));
+}
+
+if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){boot();}
+else{let t=0;const iv=setInterval(()=>{t++;if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){clearInterval(iv);boot();}else if(t>100){clearInterval(iv);}},100);}
+})();
+</script>
+</body>
+</html>
