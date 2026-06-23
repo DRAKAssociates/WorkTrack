@@ -1260,7 +1260,7 @@ function AddTaskModal(p){
   const [mode,setMode]=useState('assign');
   const [taskTypeId,setTaskTypeId]=useState(p.taskDefs[0]?.id||'');
   const [newLabel,setNewLabel]=useState('');
-  const [newGroup,setNewGroup]=useState(p.groups[0]?.id||'');
+  const [newGroup,setNewGroup]=useState(p.groups[0]?.id||'__none__');
   const [newBucket,setNewBucket]=useState('recurring');
   const [clientId,setClientId]=useState(p.clients[0]?.id||'');
   const [noClient,setNoClient]=useState(false);
@@ -1280,6 +1280,7 @@ function AddTaskModal(p){
   const [rev,setRev]=useState(modalTeam[0]?.id||'');
   const [freq,setFreq]=useState('none');
   const [newIsCompliance,setNewIsCompliance]=useState(false);
+  const [formError,setFormError]=useState('');
   // Inline creation state — kept in parent so remounts don't reset it
   const [addingGroup,setAddingGroup]=useState(false);
   const [groupDraft,setGroupDraft]=useState('');
@@ -1298,20 +1299,24 @@ function AddTaskModal(p){
   const fieldWrap={marginBottom:12};
 
   const handleSubmit=()=>{
-    const finalClientId = noClient ? null : clientId;
-    const finalPeriod = noPeriod ? null : period;
+    setFormError('');
+    const finalClientId = noClient ? null : (clientId||null);
+    const finalPeriod = noPeriod ? null : (period||null);
     if(mode==='newtype'){
-      if(!newLabel.trim()) return;
+      if(!newLabel.trim()){ setFormError('Task type name is required.'); return; }
+      if(!due){ setFormError('Due date is required.'); return; }
+      const resolvedGroup = (newGroup && newGroup!=='__none__') ? newGroup : null;
+      if(!resolvedGroup){ setFormError('Work category is required — select one or create a new one.'); return; }
       const newId='custom_'+uid();
-      p.onCreateTaskType({id:newId,label:newLabel.trim(),group:newGroup,bucket:newBucket,isCompliance:newIsCompliance});
-      if(due){
-        const pIdx=modalTeam.findIndex(t=>t.id===prep); const rIdx=modalTeam.findIndex(t=>t.id===rev);
-        p.onAddAssignment({id:uid(),tid:newId,cid:finalClientId,period:finalPeriod,due,prep,rev,
-          pi:pIdx>=0?pIdx:0,ri:rIdx>=0?rIdx:0,
-          status:'pending',od:false,freq:finalClientId?freq:'none',st:[]});
+      p.onCreateTaskType({id:newId,label:newLabel.trim(),group:resolvedGroup,bucket:newBucket,isCompliance:newIsCompliance});
+      const pIdx=modalTeam.findIndex(t=>t.id===prep); const rIdx=modalTeam.findIndex(t=>t.id===rev);
+      p.onAddAssignment({id:uid(),tid:newId,cid:finalClientId,period:finalPeriod,due,prep,rev,
+        pi:pIdx>=0?pIdx:0,ri:rIdx>=0?rIdx:0,
+        status:'pending',od:false,freq:finalClientId?freq:'none',st:[]});
       }
     } else {
-      if(!taskTypeId||!due) return;
+      if(!taskTypeId){ setFormError('Please select a task type.'); return; }
+      if(!due){ setFormError('Due date is required.'); return; }
       const pIdx=modalTeam.findIndex(t=>t.id===prep); const rIdx=modalTeam.findIndex(t=>t.id===rev);
       p.onAddAssignment({id:uid(),tid:taskTypeId,cid:finalClientId,period:finalPeriod,due,prep,rev,
         pi:pIdx>=0?pIdx:0,ri:rIdx>=0?rIdx:0,
@@ -1324,9 +1329,12 @@ function AddTaskModal(p){
     e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:440,maxHeight:'88vh',overflowY:'auto',boxShadow:'0 0 0 1px var(--color-border-tertiary)'}},
       e('div',{style:{fontSize:15,fontWeight:500,color:'var(--color-text-primary)',marginBottom:4}},'Add task'),
       e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:14}},'Assign an existing task type to a client, or create a brand new task type.'),
+      formError ? e('div',{style:{fontSize:11,color:'#712B13',background:'#FAECE7',border:'0.5px solid #F0997B',borderRadius:'var(--border-radius-md)',padding:'7px 10px',marginBottom:12}},
+        e('i',{className:'ti ti-alert-circle',style:{marginRight:5},'aria-hidden':'true'}), formError
+      ) : null,
       e('div',{style:{display:'flex',gap:6,marginBottom:16}},
-        e('div',{onClick:()=>setMode('assign'),style:{flex:1,textAlign:'center',padding:'7px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='assign'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='assign'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='assign'?500:400}},'Assign existing task'),
-        e('div',{onClick:()=>setMode('newtype'),style:{flex:1,textAlign:'center',padding:'7px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='newtype'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='newtype'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='newtype'?500:400}},'Create new task type')
+        e('div',{onClick:()=>{setMode('assign');setFormError('');},style:{flex:1,textAlign:'center',padding:'7px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='assign'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='assign'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='assign'?500:400}},'Assign existing task'),
+        e('div',{onClick:()=>{setMode('newtype');setFormError('');},style:{flex:1,textAlign:'center',padding:'7px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='newtype'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='newtype'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='newtype'?500:400}},'Create new task type')
       ),
 
       mode==='newtype' ? e(React.Fragment,null,
@@ -1334,9 +1342,27 @@ function AddTaskModal(p){
           e('input',{style:inputStyle,placeholder:'e.g. PT Return Filing',value:newLabel,onChange:ev=>setNewLabel(ev.target.value)})),
         e('div',{style:{display:'flex',gap:10,marginBottom:12}},
           e('div',{style:{flex:1}},e('label',{style:labelStyle},'Work category'),
-            e(CreatableSelect,{value:newGroup,options:p.groups,newLabel:'category',placeholder:'e.g. ROC / MCA',
-              adding:addingGroup,setAdding:setAddingGroup,draft:groupDraft,setDraft:setGroupDraft,
-              onChange:setNewGroup,onCreate:label=>{const g=p.onCreateGroup(label); setNewGroup(g.id);}})),
+            p.groups.length===0 && !addingGroup
+              ? e('div',{style:{display:'flex',gap:6}},
+                  e('input',{
+                    style:inputStyle,autoFocus:true,placeholder:'e.g. GST, Income Tax…',
+                    value:groupDraft,onChange:ev=>setGroupDraft(ev.target.value),
+                    onKeyDown:ev=>{
+                      if(ev.key==='Enter'&&groupDraft.trim()){const g=p.onCreateGroup(groupDraft.trim());setNewGroup(g.id);setGroupDraft('');}
+                      if(ev.key==='Escape') setGroupDraft('');
+                    }
+                  }),
+                  e(Btn,{onClick:()=>{if(groupDraft.trim()){const g=p.onCreateGroup(groupDraft.trim());setNewGroup(g.id);setGroupDraft('');}}}, 'Add')
+                )
+              : e(React.Fragment,null,
+                  e(CreatableSelect,{value:newGroup,options:p.groups,newLabel:'category',placeholder:'e.g. ROC / MCA',
+                    adding:addingGroup,setAdding:setAddingGroup,draft:groupDraft,setDraft:setGroupDraft,
+                    onChange:setNewGroup,onCreate:label=>{const g=p.onCreateGroup(label); setNewGroup(g.id);}}),
+                  newGroup && newGroup!=='__none__' && p.groups.find(g=>g.id===newGroup)
+                    ? e('div',{style:{fontSize:9,color:'#0F6E56',marginTop:3}}, '✓ '+p.groups.find(g=>g.id===newGroup).label)
+                    : null
+                )
+          ),
           e('div',{style:{flex:1}},e('label',{style:labelStyle},'Bucket'),
             e('select',{style:inputStyle,value:newBucket,onChange:ev=>setNewBucket(ev.target.value)},BUCKETS.map(b=>e('option',{key:b.id,value:b.id},b.label))))
         ),
@@ -1395,7 +1421,7 @@ function AddTaskModal(p){
         ) : null
       ),
 
-      e('div',{style:{marginBottom:12}},e('label',{style:labelStyle},'Due date'),
+      e('div',{style:{marginBottom:12}},e('label',{style:labelStyle},'Due date ',e('span',{style:{color:'#993C1D'}},'*')),
         e('input',{style:inputStyle,placeholder:'e.g. 20 Jul',value:due,onChange:ev=>setDue(ev.target.value)})),
 
       e('div',{style:{display:'flex',gap:10,marginBottom:12}},
@@ -1495,7 +1521,7 @@ function WorkTrackApp(p){
         groups:newGroups||groups,
         taskDefs:newTaskDefs||taskDefs,
         clients:newClients||clients,
-        people:TEAM.map(t=>({id:t.id,name:t.name,role:'preparer',accountType:'shared'})),
+        people: p.initialData.people, // preserve original people data with correct roles
         refLabels
       });
     }
@@ -1885,15 +1911,27 @@ function WorkTrackApp(p){
     );
   };
 
-  const GroupedTasks=tdList=>e(React.Fragment,null,groups.map(g=>{
-    const gt=tdList.filter(t=>t.group===g.id);
-    if(!gt.some(t=>ct.some(x=>x.tid===t.id))) return null;
-    return e('div',{key:g.id},
-      e('div',{style:{display:'flex',alignItems:'center',gap:6,padding:'5px 0 4px',borderBottom:'0.5px solid var(--color-border-tertiary)',marginBottom:5,marginTop:10}},
-        e('span',{style:{fontSize:11,fontWeight:500,color:'var(--color-text-secondary)'}},g.label)),
-      gt.map(TaskRow)
-    );
-  }));
+  const GroupedTasks=tdList=>e(React.Fragment,null,[
+    ...groups.map(g=>{
+      const gt=tdList.filter(t=>t.group===g.id);
+      if(!gt.some(t=>ct.some(x=>x.tid===t.id))) return null;
+      return e('div',{key:g.id},
+        e('div',{style:{display:'flex',alignItems:'center',gap:6,padding:'5px 0 4px',borderBottom:'0.5px solid var(--color-border-tertiary)',marginBottom:5,marginTop:10}},
+          e('span',{style:{fontSize:11,fontWeight:500,color:'var(--color-text-secondary)'}},g.label)),
+        gt.map(TaskRow)
+      );
+    }),
+    // catch tasks with no group (blank/null group) so they're never invisible
+    (()=>{
+      const ungrouped=tdList.filter(t=>!t.group||!groups.some(g=>g.id===t.group));
+      if(!ungrouped.some(t=>ct.some(x=>x.tid===t.id))) return null;
+      return e('div',{key:'__ungrouped__'},
+        e('div',{style:{display:'flex',alignItems:'center',gap:6,padding:'5px 0 4px',borderBottom:'0.5px solid var(--color-border-tertiary)',marginBottom:5,marginTop:10}},
+          e('span',{style:{fontSize:11,fontWeight:500,color:'#993C1D'}},'⚠ Uncategorised (no work category set)')),
+        ungrouped.map(TaskRow)
+      );
+    })()
+  ]);
 
   const ClientsView=()=>{
     const list = focusClient ? clients.filter(c=>c.id===focusClient) : clients;
