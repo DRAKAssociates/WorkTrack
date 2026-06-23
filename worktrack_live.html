@@ -82,8 +82,8 @@ const CONFIG = {
   // Reviewer accounts — these users get full MS login + private file access
   // Add the actual email addresses of your reviewer accounts here
   reviewerEmails: [
-    'deepak@drak.co.in',       // REPLACE with your actual reviewer email
-    'amruta@drak.co.in',    // REPLACE with second reviewer email (or remove if only 1)
+    'deepak@drak.co.in',
+    'amruta@drak.co.in',
   ],
 
   orgName: 'DRAK Associates',
@@ -140,25 +140,25 @@ async function graphPut(url, body){
 
 // ── Excel read/write via Graph API ───────────────────────────
 // Get SharePoint site drive item for a file
-// Use Graph /shares endpoint — resolves any SharePoint sharing URL directly
-const SHARED_SHARE_TOKEN = "u!aHR0cHM6Ly9kcmFrYXNzb2NpYXRlcy5zaGFyZXBvaW50LmNvbS86eDovcy9EUkFLRmlsZXMvSVFCVU1wWTBqRjBvUUtqVmhWUmVET2pXQWFuMjVxbGdvZ3dKdWZEQ2FRdk53R2c_ZT1lUWtjTkQ";
-const PRIVATE_SHARE_TOKEN = "u!aHR0cHM6Ly9kcmFrYXNzb2NpYXRlcy1teS5zaGFyZXBvaW50LmNvbS86eDovZy9wZXJzb25hbC9kZWVwYWtfZHJha19jb19pbi9JUUJ2M1dnQy1LbTRSSUFwQk5CbEE4S1dBVTBaWmg2MVpzd1ZxWlZtOFMyRVgzTT9lPXhvSHpjUw";
-
+// Resolve files via SharePoint site and personal OneDrive paths
 async function getSharedFileUrl(){
-  // Use $expand to get parentReference with driveId
-  const item = await graphGet(`/shares/${SHARED_SHARE_TOKEN}/driveItem?$expand=parentReference`);
-  const driveId = item.parentReference?.driveId || item.remoteItem?.parentReference?.driveId;
-  const itemId = item.id || item.remoteItem?.id;
-  if(!driveId) throw new Error('Could not resolve shared file driveId: '+JSON.stringify(Object.keys(item)));
-  return {driveId, itemId};
+  // Get site, then default drive, then find file by path
+  const site = await graphGet('/sites/drakassociates.sharepoint.com:/sites/DRAKFiles');
+  const drive = await graphGet("/sites/"+site.id+"/drive");
+  // Search for the file by name in the drive
+  const search = await graphGet("/drives/"+drive.id+"/root/search(q='worktrack_shared.xlsx')");
+  const file = search.value.find(f=>f.name==='worktrack_shared.xlsx');
+  if(!file) throw new Error('worktrack_shared.xlsx not found in SharePoint drive');
+  return {driveId: drive.id, itemId: file.id};
 }
 
 async function getPrivateFileUrl(){
-  const item = await graphGet(`/shares/${PRIVATE_SHARE_TOKEN}/driveItem?$expand=parentReference`);
-  const driveId = item.parentReference?.driveId || item.remoteItem?.parentReference?.driveId;
-  const itemId = item.id || item.remoteItem?.id;
-  if(!driveId) throw new Error('Could not resolve private file driveId: '+JSON.stringify(Object.keys(item)));
-  return {driveId, itemId};
+  // Access via the logged-in user's personal drive
+  const drive = await graphGet('/me/drive');
+  const search = await graphGet("/me/drive/root/search(q='worktrack_private.xlsx')");
+  const file = search.value.find(f=>f.name==='worktrack_private.xlsx');
+  if(!file) throw new Error('worktrack_private.xlsx not found in personal OneDrive');
+  return {driveId: drive.id, itemId: file.id};
 }
 
 async function downloadExcel(driveId, itemId, userId){
