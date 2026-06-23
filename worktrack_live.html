@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkTrack — DRAK Associates</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
+<style>
+  :root{
+    --color-background-primary:#ffffff;
+    --color-background-secondary:#F4F3EF;
+    --color-background-tertiary:#EDEBE4;
+    --color-text-primary:#1A1A18;
+    --color-text-secondary:#5F5E5A;
+    --color-text-tertiary:#8C8B86;
+    --color-border-tertiary:rgba(0,0,0,0.10);
+    --color-border-secondary:rgba(0,0,0,0.20);
+    --border-radius-md:8px;
+    --border-radius-lg:12px;
+    --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:0;font-family:var(--font-sans);background:var(--color-background-tertiary)}
+  select,input{font-family:var(--font-sans)}
+
+  /* Login screen */
+  .login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:20px}
+  .login-card{background:var(--color-background-primary);border-radius:var(--border-radius-lg);padding:40px 48px;text-align:center;box-shadow:0 2px 20px rgba(0,0,0,0.08);width:360px}
+  .login-logo{font-size:28px;font-weight:600;color:#534AB7;margin-bottom:4px}
+  .login-sub{font-size:13px;color:var(--color-text-tertiary);margin-bottom:28px}
+  .login-btn{width:100%;padding:11px;background:#534AB7;color:#fff;border:none;border-radius:var(--border-radius-md);font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+  .login-btn:hover{background:#3C3489}
+  .login-btn.secondary{background:transparent;color:#534AB7;border:0.5px solid #534AB7}
+  .login-btn.secondary:hover{background:#EEEDFE}
+  .login-divider{font-size:11px;color:var(--color-text-tertiary);margin:8px 0}
+
+  /* Preparer picker */
+  .picker-list{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+  .picker-item{padding:10px 14px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);cursor:pointer;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--color-text-primary);background:var(--color-background-primary)}
+  .picker-item:hover{border-color:#534AB7;background:#EEEDFE;color:#534AB7}
+  .picker-avatar{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;color:#fff;flex-shrink:0}
+
+  /* Loading */
+  .loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:12px}
+  .spinner{width:32px;height:32px;border:3px solid #EEEDFE;border-top-color:#534AB7;border-radius:50%;animation:spin 0.8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading-text{font-size:13px;color:var(--color-text-tertiary)}
+
+  /* Save indicator */
+  .save-indicator{position:fixed;bottom:16px;right:16px;background:#534AB7;color:#fff;font-size:11px;padding:6px 12px;border-radius:20px;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:2000}
+  .save-indicator.visible{opacity:1}
+  .save-indicator.error{background:#993C1D}
+
+  /* App wrapper */
+  .app-wrap{padding:16px;min-height:100vh}
+</style>
+</head>
+<body>
+<div id="wt-root"></div>
+
+<script>
+// ============================================================
+// CONFIGURATION — PASTE YOUR VALUES HERE
+// ============================================================
+const CONFIG = {
+  clientId:    '49a9b4aa-8c5f-4e6c-a19e-489d07eb871e',
+  tenantId:    'd28b31ca-9b58-4f51-94ca-d63e016511b3',
+
+  // SharePoint details (extracted from your file URLs)
+  sharedSiteHost:   'drakassociates.sharepoint.com',
+  sharedSitePath:   '/sites/DRAKFiles',
+  sharedFileName:   'worktrack_shared.xlsx',
+
+  privateSiteHost:  'drakassociates-my.sharepoint.com',
+  privateUserLogin: 'deepak_drak_co_in',
+  privateFileName:  'worktrack_private.xlsx',
+
+  // Reviewer accounts — these users get full MS login + private file access
+  // Add the actual email addresses of your reviewer accounts here
+  reviewerEmails: [
+    'deepak@drak.co.in',       // REPLACE with your actual reviewer email
+    'amruta@drak.co.in',    // REPLACE with second reviewer email (or remove if only 1)
+  ],
+
+  orgName: 'DRAK Associates',
+};
+// ============================================================
+
+const AVC = ['#534AB7','#0F6E56','#993C1D','#185FA5','#854F0B'];
+
+// ── MSAL Auth setup ──────────────────────────────────────────
+const msalConfig = {
+  auth: {
+    clientId: CONFIG.clientId,
+    authority: `https://login.microsoftonline.com/${CONFIG.tenantId}`,
+    redirectUri: 'https://drakassociates.github.io/WorkTrack/worktrack_live.html',
+  },
+  cache: { cacheLocation: 'sessionStorage' }
+};
+
+const msalInstance = new msal.PublicClientApplication(msalConfig);
+const SCOPES = ['User.Read','Files.ReadWrite','Sites.ReadWrite.All'];
+
+// ── SharePoint Graph API helpers ─────────────────────────────
+async function getToken(){
+  const accounts = msalInstance.getAllAccounts();
+  if(!accounts.length) throw new Error('Not signed in');
+  try{
+    const resp = await msalInstance.acquireTokenSilent({scopes:SCOPES, account:accounts[0]});
+    return resp.accessToken;
+  } catch(e){
+    const resp = await msalInstance.acquireTokenPopup({scopes:SCOPES});
+    return resp.accessToken;
+  }
+}
+
+async function graphGet(url){
+  const token = await getToken();
+  const resp = await fetch('https://graph.microsoft.com/v1.0'+url,{
+    headers:{Authorization:'Bearer '+token}
+  });
+  if(!resp.ok) throw new Error('Graph GET failed: '+url+' '+resp.status);
+  return resp.json();
+}
+
+async function graphPut(url, body){
+  const token = await getToken();
+  const resp = await fetch('https://graph.microsoft.com/v1.0'+url,{
+    method:'PUT',
+    headers:{Authorization:'Bearer '+token,'Content-Type':'application/octet-stream'},
+    body
+  });
+  if(!resp.ok) throw new Error('Graph PUT failed: '+url+' '+resp.status);
+  return resp;
+}
+
+// ── Excel read/write via Graph API ───────────────────────────
+// Get SharePoint site drive item for a file
+async function getSharedFileUrl(){
+  // Get the drive ID for the SharePoint site
+  const site = await graphGet(`/sites/${CONFIG.sharedSiteHost}:${CONFIG.sharedSitePath}`);
+  const drives = await graphGet(`/sites/${site.id}/drives`);
+  const drive = drives.value[0];
+  const items = await graphGet(`/drives/${drive.id}/root/search(q='${CONFIG.sharedFileName}')`);
+  const file = items.value.find(i=>i.name===CONFIG.sharedFileName);
+  if(!file) throw new Error('Shared file not found');
+  return {driveId: drive.id, itemId: file.id};
+}
+
+async function getPrivateFileUrl(){
+  const resp = await graphGet(`/users/${CONFIG.privateUserLogin}/drive/root/search(q='${CONFIG.privateFileName}')`);
+  const file = resp.value.find(i=>i.name===CONFIG.privateFileName);
+  if(!file) throw new Error('Private file not found');
+  return {driveId: null, userId: CONFIG.privateUserLogin, itemId: file.id};
+}
+
+async function downloadExcel(driveId, itemId, userId){
+  const token = await getToken();
+  const url = driveId
+    ? `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`
+    : `https://graph.microsoft.com/v1.0/users/${userId}/drive/items/${itemId}/content`;
+  const resp = await fetch(url,{headers:{Authorization:'Bearer '+token}});
+  if(!resp.ok) throw new Error('Download failed '+resp.status);
+  const buffer = await resp.arrayBuffer();
+  return XLSX.read(buffer,{type:'array'});
+}
+
+async function uploadExcel(wb, driveId, itemId, userId){
+  const buffer = XLSX.write(wb,{type:'array',bookType:'xlsx'});
+  const url = driveId
+    ? `/drives/${driveId}/items/${itemId}/content`
+    : `/users/${userId}/drive/items/${itemId}/content`;
+  await graphPut(url, buffer);
+}
+
+// ── Parse Excel sheets into app data structures ───────────────
+function parseSheet(wb, sheetName){
+  const ws = wb.Sheets[sheetName];
+  if(!ws) return [];
+  return XLSX.utils.sheet_to_json(ws,{defval:''});
+}
+
+function sheetToWorkbook(wb, sheetName, rows, columns){
+  const ws = XLSX.utils.json_to_sheet(rows,{header:columns});
+  ws['!cols'] = columns.map(c=>({wch:Math.max(12,c.length+2)}));
+  wb.Sheets[sheetName] = ws;
+  if(!wb.SheetNames.includes(sheetName)) wb.SheetNames.push(sheetName);
+}
+
+function rowsToApp(sharedWb, privateWb, isReviewer){
+  const clients = parseSheet(sharedWb,'Clients').map(r=>({id:r.ID,name:r.Name,defaultFreq:r.DefaultFreq||'none'}));
+  const taskDefs = parseSheet(sharedWb,'TaskTypes').map(r=>({id:r.ID,label:r.Label,group:r.Group,bucket:r.Bucket,isCompliance:r.IsCompliance==='true'||r.IsCompliance===true||r.IsCompliance==='TRUE'}));
+  const groups = [...new Set(taskDefs.map(t=>t.group))].map(g=>({id:g,label:g}));
+  const people = parseSheet(sharedWb,'People').map(r=>({id:r.ID,name:r.Name,role:r.Role,accountType:r.AccountType}));
+  const settings = {};
+  parseSheet(sharedWb,'Settings').forEach(r=>{settings[r.Key]=r.Value;});
+
+  const refLabels = {
+    ref1: settings.RefLabel1||'Reference 1',
+    ref2: settings.RefLabel2||'Reference 2',
+    ref3: settings.RefLabel3||'Reference 3',
+  };
+
+  const parseAssignments = (wb, isPrivate) => {
+    const rows = parseSheet(wb,'Assignments');
+    const subs = parseSheet(wb,'SubTasks');
+    return rows.map(r=>({
+      id:r.ID, tid:r.TaskTypeID, cid:r.ClientID||null,
+      period:r.Period||null, due:r.DueDate||'', prep:r.Preparer||'', rev:r.Reviewer||'',
+      pi:0, ri:0, status:r.Status||'pending', freq:r.Frequency||'none',
+      filedDate:r.FiledDate||undefined, ackNo:r.AckNumber||undefined,
+      fy:r.FY||undefined, ref1:r.Ref1||undefined, ref2:r.Ref2||undefined, ref3:r.Ref3||undefined,
+      closedWithoutReview:r.ClosedWithoutApproval==='true'||r.ClosedWithoutApproval===true,
+      resignNote:r.ResignNote||undefined,
+      isPrivate: !!isPrivate,
+      st: subs.filter(s=>s.AssignmentID===r.ID).map(s=>({id:s.ID,t:s.Text,d:s.Done==='true'||s.Done===true}))
+    }));
+  };
+
+  const sharedAssignments = parseAssignments(sharedWb, false);
+  const privateAssignments = isReviewer ? parseAssignments(privateWb, true) : [];
+  const allAssignments = [...sharedAssignments, ...privateAssignments];
+
+  // Resolve avatar indices
+  const teamMap = {};
+  people.forEach((p,i)=>{ teamMap[p.id]=i; });
+  allAssignments.forEach(r=>{
+    r.pi = teamMap[r.prep]??0;
+    r.ri = teamMap[r.rev]??0;
+  });
+
+  return {clients, taskDefs, groups, people, settings, refLabels, ct: allAssignments};
+}
+
+function appToRows(ct, taskDefs, isReviewer){
+  const ASSIGN_COLS = ['ID','TaskTypeID','ClientID','Period','DueDate','Preparer','Reviewer',
+    'Status','Frequency','FiledDate','AckNumber','FY','Ref1','Ref2','Ref3','ClosedWithoutApproval','ResignNote'];
+  const SUB_COLS = ['ID','AssignmentID','Text','Done'];
+
+  const toAssignRow = r => ({
+    ID:r.id, TaskTypeID:r.tid, ClientID:r.cid||'', Period:r.period||'', DueDate:r.due,
+    Preparer:r.prep, Reviewer:r.rev, Status:r.status, Frequency:r.freq,
+    FiledDate:r.filedDate||'', AckNumber:r.ackNo||'', FY:r.fy||'',
+    Ref1:r.ref1||'', Ref2:r.ref2||'', Ref3:r.ref3||'',
+    ClosedWithoutApproval:r.closedWithoutReview?'true':'false',
+    ResignNote:r.resignNote||''
+  });
+  const toSubRows = r => r.st.map(s=>({ID:s.id, AssignmentID:r.id, Text:s.t, Done:s.d?'true':'false'}));
+
+  const sharedRows = ct.filter(r=>!r.isPrivate);
+  const privateRows = ct.filter(r=>r.isPrivate);
+
+  const sharedAssignRows = sharedRows.map(toAssignRow);
+  const sharedSubRows = sharedRows.flatMap(toSubRows);
+  const privateAssignRows = privateRows.map(toAssignRow);
+  const privateSubRows = privateRows.flatMap(toSubRows);
+
+  return {sharedAssignRows, sharedSubRows, privateAssignRows, privateSubRows, ASSIGN_COLS, SUB_COLS};
+}
+
+// ── Main React App ────────────────────────────────────────────
+(function(){
+function boot(){
+const e = React.createElement;
+const useState = React.useState;
+const useEffect = React.useEffect;
+const useRef = React.useRef;
+
+function App(){
+  const [phase, setPhase] = useState('init'); // init|login|preparer-pick|loading|app|error
+  const [currentUser, setCurrentUser] = useState(null); // {id, name, role, isReviewer, email}
+  const [appData, setAppData] = useState(null);
+  const [sharedFileRef, setSharedFileRef] = useState(null);
+  const [privateFileRef, setPrivateFileRef] = useState(null);
+  const [sharedWb, setSharedWb] = useState(null);
+  const [privateWb, setPrivateWb] = useState(null);
+  const [saveState, setSaveState] = useState('idle'); // idle|saving|saved|error
+  const saveTimer = useRef(null);
+  const pendingSave = useRef(false);
+
+  useEffect(()=>{
+    msalInstance.initialize().then(()=>{
+      // Handle redirect after login
+      msalInstance.handleRedirectPromise().then(resp=>{
+        if(resp && resp.account){
+          handleMsalLogin(resp.account, resp.accessToken);
+        } else {
+          const accounts = msalInstance.getAllAccounts();
+          if(accounts.length){
+            handleMsalLogin(accounts[0], null);
+          } else {
+            setPhase('login');
+          }
+        }
+      }).catch(()=>setPhase('login'));
+    });
+  },[]);
+
+  const handleMsalLogin = async (account, token) => {
+    setPhase('loading');
+    try{
+      const email = account.username;
+      const isReviewer = CONFIG.reviewerEmails.some(r=>r.toLowerCase()===email.toLowerCase());
+      const displayName = account.name||email;
+
+      // Find this person in People sheet or create entry
+      setCurrentUser({
+        id: isReviewer ? email.split('@')[0].toUpperCase() : null,
+        name: displayName,
+        email,
+        isReviewer,
+        role: isReviewer ? 'reviewer' : 'preparer'
+      });
+
+      await loadData(isReviewer);
+    } catch(err){
+      console.error(err);
+      setPhase('error');
+    }
+  };
+
+  const signInWithMicrosoft = async () => {
+    try{
+      await msalInstance.loginPopup({scopes:SCOPES});
+      const accounts = msalInstance.getAllAccounts();
+      if(accounts.length) await handleMsalLogin(accounts[0], null);
+    } catch(e){ console.error(e); }
+  };
+
+  const loadData = async (isReviewer) => {
+    setPhase('loading');
+    try{
+      // Load shared file
+      const sharedRef = await getSharedFileUrl();
+      setSharedFileRef(sharedRef);
+      const sWb = await downloadExcel(sharedRef.driveId, sharedRef.itemId, null);
+      setSharedWb(sWb);
+
+      let pWb = null;
+      let privateRef = null;
+      if(isReviewer){
+        try{
+          privateRef = await getPrivateFileUrl();
+          setPrivateFileRef(privateRef);
+          pWb = await downloadExcel(null, privateRef.itemId, privateRef.userId);
+          setPrivateWb(pWb);
+        } catch(e){ console.warn('Private file not found, skipping',e); }
+      }
+
+      const data = rowsToApp(sWb, pWb||{Sheets:{},SheetNames:[]}, isReviewer);
+      setAppData(data);
+
+      // If reviewer, go straight to app. If preparer account, show picker.
+      if(isReviewer){
+        setPhase('app');
+      } else {
+        setPhase('preparer-pick');
+      }
+    } catch(err){
+      console.error('Load error:', err);
+      setPhase('error');
+    }
+  };
+
+  const pickPreparer = (person) => {
+    setCurrentUser(prev=>({...prev, id:person.id, name:person.name, role:'preparer'}));
+    setPhase('app');
+  };
+
+  // Auto-save whenever ct changes — debounced 3 seconds
+  const triggerSave = async (newCt, newAppData) => {
+    if(saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async ()=>{
+      setSaveState('saving');
+      try{
+        const data = newAppData || appData;
+        const {sharedAssignRows, sharedSubRows, privateAssignRows, privateSubRows, ASSIGN_COLS, SUB_COLS} = appToRows(newCt||data.ct, data.taskDefs, currentUser?.isReviewer);
+
+        // Write shared workbook
+        const sWb = sharedWb || XLSX.read('',{type:'string'});
+        sheetToWorkbook(sWb,'Assignments',sharedAssignRows,ASSIGN_COLS);
+        sheetToWorkbook(sWb,'SubTasks',sharedSubRows,SUB_COLS);
+
+        // Write clients, taskTypes, people back too
+        sheetToWorkbook(sWb,'Clients',data.clients.map(c=>({ID:c.id,Name:c.name,DefaultFreq:c.defaultFreq})),['ID','Name','DefaultFreq']);
+        sheetToWorkbook(sWb,'TaskTypes',data.taskDefs.map(t=>({ID:t.id,Label:t.label,Group:t.group,Bucket:t.bucket,IsCompliance:t.isCompliance?'true':'false'})),['ID','Label','Group','Bucket','IsCompliance']);
+        sheetToWorkbook(sWb,'People',data.people.map(p=>({ID:p.id,Name:p.name,Role:p.role,AccountType:p.accountType})),['ID','Name','Role','AccountType']);
+
+        await uploadExcel(sWb, sharedFileRef?.driveId, sharedFileRef?.itemId, null);
+
+        // Write private workbook if reviewer
+        if(currentUser?.isReviewer && privateWb && privateFileRef){
+          const pWb = privateWb;
+          sheetToWorkbook(pWb,'Assignments',privateAssignRows,ASSIGN_COLS);
+          sheetToWorkbook(pWb,'SubTasks',privateSubRows,SUB_COLS);
+          await uploadExcel(pWb, null, privateFileRef.itemId, privateFileRef.userId);
+        }
+
+        setSaveState('saved');
+        setTimeout(()=>setSaveState('idle'),2000);
+      } catch(err){
+        console.error('Save error:',err);
+        setSaveState('error');
+        setTimeout(()=>setSaveState('idle'),3000);
+      }
+    },3000);
+  };
+
+  const updateData = (patch) => {
+    setAppData(prev=>{
+      const next = {...prev,...patch};
+      triggerSave(next.ct, next);
+      return next;
+    });
+  };
+
+  // ── Login screen ─────────────────────────────────────────
+  if(phase==='login'){
+    return e('div',{className:'login-screen'},
+      e('div',{className:'login-card'},
+        e('div',{className:'login-logo'},'WorkTrack'),
+        e('div',{className:'login-sub'},CONFIG.orgName),
+        e('button',{className:'login-btn',onClick:signInWithMicrosoft},
+          e('i',{className:'ti ti-brand-microsoft','aria-hidden':'true'}),
+          'Sign in with Microsoft'
+        ),
+        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginTop:8}},'Use your '+CONFIG.orgName+' Microsoft account')
+      )
+    );
+  }
+
+  // ── Preparer picker ───────────────────────────────────────
+  if(phase==='preparer-pick'){
+    const preparers = (appData?.people||[]).filter(p=>p.role==='preparer');
+    return e('div',{className:'login-screen'},
+      e('div',{className:'login-card'},
+        e('div',{className:'login-logo'},'WorkTrack'),
+        e('div',{className:'login-sub'},'Who are you today?'),
+        e('div',{className:'picker-list'},
+          preparers.map((p,i)=>e('div',{key:p.id,className:'picker-item',onClick:()=>pickPreparer(p)},
+            e('div',{className:'picker-avatar',style:{background:AVC[i%5]}},p.name.slice(0,2).toUpperCase()),
+            p.name
+          ))
+        )
+      )
+    );
+  }
+
+  // ── Loading ───────────────────────────────────────────────
+  if(phase==='loading'||phase==='init'){
+    return e('div',{className:'loading-screen'},
+      e('div',{className:'spinner'}),
+      e('div',{className:'loading-text'},phase==='init'?'Starting up…':'Loading your data from SharePoint…')
+    );
+  }
+
+  // ── Error ─────────────────────────────────────────────────
+  if(phase==='error'){
+    return e('div',{className:'loading-screen'},
+      e('div',{style:{fontSize:32,marginBottom:8}},'⚠️'),
+      e('div',{style:{fontSize:14,color:'var(--color-text-primary)',marginBottom:4}},'Could not connect to SharePoint'),
+      e('div',{style:{fontSize:12,color:'var(--color-text-tertiary)',marginBottom:16,textAlign:'center',maxWidth:300}},'Check that your Client ID and Tenant ID are correctly pasted in the CONFIG section at the top of this file, and that you have internet access.'),
+      e('button',{onClick:()=>setPhase('login'),style:{padding:'8px 16px',background:'#534AB7',color:'#fff',border:'none',borderRadius:'var(--border-radius-md)',cursor:'pointer',fontSize:13}},'Try again')
+    );
+  }
+
+  // ── Main app ──────────────────────────────────────────────
+  if(phase==='app' && appData){
+    return e(React.Fragment,null,
+      e(SaveIndicator,{state:saveState}),
+      e(MainApp,{
+        appData, currentUser, updateData,
+        onSignOut:()=>{
+          msalInstance.logoutPopup();
+          setPhase('login');
+          setCurrentUser(null);
+          setAppData(null);
+        }
+      })
+    );
+  }
+
+  return e('div',{className:'loading-screen'},e('div',{className:'spinner'}));
+}
+
+function SaveIndicator(p){
+  const msgs = {saving:'Saving to SharePoint…',saved:'✓ Saved',error:'⚠ Save failed — check connection',idle:''};
+  return e('div',{className:'save-indicator'+(p.state!=='idle'?' visible':'')+(p.state==='error'?' error':'')},msgs[p.state]||'');
+}
+
+function MainApp(p){
+  // Embed the full prototype app here, wired to appData instead of INIT_CT
+  // For now render a confirmation screen — the full wiring follows in the next step
+  const {appData, currentUser, updateData, onSignOut} = p;
+  const [view,setView] = useState('dashboard');
+
+  return e('div',{style:{padding:16,maxWidth:1020,margin:'0 auto'}},
+    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}},
+      e('div',{style:{fontSize:18,fontWeight:600,color:'#534AB7'}},'WorkTrack'),
+      e('div',{style:{display:'flex',alignItems:'center',gap:12}},
+        e('div',{style:{fontSize:12,color:'var(--color-text-secondary)'}},'Signed in as: '+currentUser.name+(currentUser.isReviewer?' (Reviewer)':' (Preparer)')),
+        e('button',{onClick:onSignOut,style:{fontSize:11,padding:'4px 10px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'transparent',cursor:'pointer'}},'Sign out')
+      )
+    ),
+    e('div',{style:{background:'#EAF3DE',border:'0.5px solid #27500A',borderRadius:'var(--border-radius-md)',padding:'12px 16px',marginBottom:16}},
+      e('div',{style:{fontSize:13,fontWeight:500,color:'#27500A',marginBottom:4}},'✓ Connected to SharePoint'),
+      e('div',{style:{fontSize:11,color:'#3B6D11'}},'Shared file: '+CONFIG.sharedFileName+' · '+appData.ct.filter(r=>!r.isPrivate).length+' shared tasks loaded'),
+      currentUser.isReviewer ? e('div',{style:{fontSize:11,color:'#3B6D11'}},'Private file: '+CONFIG.privateFileName+' · '+appData.ct.filter(r=>r.isPrivate).length+' private tasks loaded') : null,
+      e('div',{style:{fontSize:11,color:'#3B6D11',marginTop:4}},'Clients: '+appData.clients.length+' · Task types: '+appData.taskDefs.length+' · People: '+appData.people.length)
+    ),
+    e('div',{style:{background:'#FAEEDA',border:'0.5px solid #854F0B',borderRadius:'var(--border-radius-md)',padding:'12px 16px'}},
+      e('div',{style:{fontSize:13,fontWeight:500,color:'#633806',marginBottom:4}},'Step 8 — Full app wiring coming next'),
+      e('div',{style:{fontSize:11,color:'#633806'}},'The connection to SharePoint is working. The next step wires the full prototype UI (all 1,700+ lines) to this live data. Your data auto-saves to SharePoint every 3 seconds after any change.')
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('wt-root')).render(e(App));
+}
+
+if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){boot();}
+else{let t=0;const iv=setInterval(()=>{t++;if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){clearInterval(iv);boot();}else if(t>100){clearInterval(iv);}},100);}
+})();
+</script>
+</body>
+</html>
