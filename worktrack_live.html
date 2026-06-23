@@ -145,13 +145,20 @@ const SHARED_SHARE_TOKEN = "u!aHR0cHM6Ly9kcmFrYXNzb2NpYXRlcy5zaGFyZXBvaW50LmNvbS
 const PRIVATE_SHARE_TOKEN = "u!aHR0cHM6Ly9kcmFrYXNzb2NpYXRlcy1teS5zaGFyZXBvaW50LmNvbS86eDovZy9wZXJzb25hbC9kZWVwYWtfZHJha19jb19pbi9JUUJ2M1dnQy1LbTRSSUFwQk5CbEE4S1dBVTBaWmg2MVpzd1ZxWlZtOFMyRVgzTT9lPXhvSHpjUw";
 
 async function getSharedFileUrl(){
-  const item = await graphGet(`/shares/${SHARED_SHARE_TOKEN}/driveItem`);
-  return {driveId: item.parentReference.driveId, itemId: item.id};
+  // Use $expand to get parentReference with driveId
+  const item = await graphGet(`/shares/${SHARED_SHARE_TOKEN}/driveItem?$expand=parentReference`);
+  const driveId = item.parentReference?.driveId || item.remoteItem?.parentReference?.driveId;
+  const itemId = item.id || item.remoteItem?.id;
+  if(!driveId) throw new Error('Could not resolve shared file driveId: '+JSON.stringify(Object.keys(item)));
+  return {driveId, itemId};
 }
 
 async function getPrivateFileUrl(){
-  const item = await graphGet(`/shares/${PRIVATE_SHARE_TOKEN}/driveItem`);
-  return {driveId: item.parentReference.driveId, itemId: item.id};
+  const item = await graphGet(`/shares/${PRIVATE_SHARE_TOKEN}/driveItem?$expand=parentReference`);
+  const driveId = item.parentReference?.driveId || item.remoteItem?.parentReference?.driveId;
+  const itemId = item.id || item.remoteItem?.id;
+  if(!driveId) throw new Error('Could not resolve private file driveId: '+JSON.stringify(Object.keys(item)));
+  return {driveId, itemId};
 }
 
 async function downloadExcel(driveId, itemId, userId){
