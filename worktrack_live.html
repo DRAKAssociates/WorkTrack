@@ -153,13 +153,22 @@ async function getSharedFileUrl(){
 }
 
 async function getPrivateFileUrl(){
-  // Access via the logged-in user's personal drive
-  const drive = await graphGet('/me/drive');
-  const search = await graphGet("/me/drive/root/search(q='worktrack_private.xlsx')");
-  const file = search.value.find(f=>f.name==='worktrack_private.xlsx');
-  if(!file) throw new Error('worktrack_private.xlsx not found in personal OneDrive');
-  return {driveId: drive.id, itemId: file.id};
+  // Exact path in personal OneDrive (drakassociates-my.sharepoint.com/personal/deepak_drak_co_in)
+  const filePath = "Documents/Shared with Amruta/DRAK & Associates/WorkTrack Private/worktrack_private.xlsx";
+  try{
+    const item = await graphGet("/me/drive/root:/"+encodeURIComponent(filePath).replace(/%2F/g,'/'));
+    const drive = await graphGet('/me/drive');
+    return {driveId: drive.id, itemId: item.id};
+  } catch(e){
+    // Fallback: try search
+    const drive = await graphGet('/me/drive');
+    const search = await graphGet("/me/drive/root/search(q='worktrack_private.xlsx')");
+    const file = search.value.find(f=>f.name==='worktrack_private.xlsx');
+    if(file) return {driveId: drive.id, itemId: file.id};
+    throw new Error('Private file not found at: '+filePath);
+  }
 }
+
 
 async function downloadExcel(driveId, itemId, userId){
   const token = await getToken();
