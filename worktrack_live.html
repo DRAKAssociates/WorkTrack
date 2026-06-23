@@ -527,18 +527,7 @@ const uid = () => Math.random().toString(36).slice(2,9);
 
 const INIT_GROUPS = [{id:'gst',label:'GST'},{id:'it',label:'Income Tax'},{id:'acc',label:'Accounting'}];
 const BUCKETS=[{id:'recurring',label:'Recurring',icon:'ti-repeat'},{id:'periodical',label:'Periodical',icon:'ti-calendar-repeat'},{id:'onetime',label:'One-time',icon:'ti-calendar-event'},{id:'assessment',label:'Assessment',icon:'ti-clipboard-check'}];
-const PERIODS = [
-  // Monthly periods - FY 2024-25 and 2025-26
-  'Apr 2024','May 2024','Jun 2024','Jul 2024','Aug 2024','Sep 2024','Oct 2024','Nov 2024','Dec 2024','Jan 2025','Feb 2025','Mar 2025',
-  'Apr 2025','May 2025','Jun 2025','Jul 2025','Aug 2025','Sep 2025','Oct 2025','Nov 2025','Dec 2025','Jan 2026','Feb 2026','Mar 2026',
-  'Apr 2026','May 2026','Jun 2026',
-  // Quarterly periods
-  'Q1 FY25','Q2 FY25','Q3 FY25','Q4 FY25',
-  'Q1 FY26','Q2 FY26','Q3 FY26','Q4 FY26',
-  'Q1 FY27','Q2 FY27',
-  // Financial years
-  'AY 2022-23','AY 2023-24','AY 2024-25','AY 2025-26','AY 2026-27',
-];
+const PERIODS = []; // Periods are now dynamic — built from Year+Quarter+Month inputs
 // Financial years for the FY field on assessment tasks (Indian FY: Apr–Mar)
 const FY_OPTIONS = [
   'FY18-19','FY19-20','FY20-21','FY21-22','FY22-23','FY23-24','FY24-25','FY25-26','FY26-27'
@@ -681,14 +670,20 @@ function parsePeriod(period){
   return {};
 }
 function periodMatchesFilter(period, f){
-  if(!period) return (f.fy||'all')==='all' && (f.quarter||'all')==='all' && (f.month||'all')==='all';
+  if(!period) return !f.year && (f.quarter||'all')==='all' && (f.month||'all')==='all';
   const p=parsePeriod(period);
-  if((f.fy||'all')!=='all' && p.fy!==f.fy) return false;
+  // year filter: match against the calendar year in the period string
+  if(f.year){
+    const yearStr=String(f.year);
+    // For monthly: "Jun 2025" → year 2025. For quarterly: "Q1 FY26" → FY ends 26 → years 2025-26
+    const periodYear = period.match(/\d{4}/)?.[0];
+    if(periodYear && periodYear!==yearStr) return false;
+  }
   if((f.quarter||'all')!=='all' && p.quarter!==f.quarter) return false;
   if((f.month||'all')!=='all' && p.month!==f.month) return false;
   return true;
 }
-const BLANK_FILTER={fy:'all',quarter:'all',month:'all',status:'all'};
+const BLANK_FILTER={year:null,quarter:'all',month:'all',status:'all'};
 const MONTHS_LIST=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const QUARTERS=['Q1','Q2','Q3','Q4'];
 
@@ -839,21 +834,22 @@ function periodOptions(includeAll){
 }
 
 function MiniFilterBar(p){
-  // p.filter = {fy, quarter, month, status}; p.onChange(newFilter)
+  // p.filter = {year, quarter, month, status}; p.onChange(newFilter)
   const f=p.filter||BLANK_FILTER;
-  const fyOpts=[...new Set(PERIODS.map(pr=>parsePeriod(pr).fy).filter(Boolean))].sort();
   const upd=patch=>p.onChange({...f,...patch});
+  const selStyle={fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'};
   return e('div',{style:{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
-    e('select',{value:f.fy||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({fy:ev.target.value})},style:{fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'}},
-      [e('option',{key:'all',value:'all'},'All FY'),...fyOpts.map(fy=>e('option',{key:fy,value:fy},fy))]
-    ),
-    e('select',{value:f.quarter||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({quarter:ev.target.value})},style:{fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'}},
+    e('input',{type:'number',placeholder:'Year',value:f.year||'',min:2000,max:2099,
+      onClick:ev=>ev.stopPropagation(),
+      onChange:ev=>{ev.stopPropagation();upd({year:ev.target.value?parseInt(ev.target.value):null});},
+      style:{...selStyle,width:60,cursor:'text'}}),
+    e('select',{value:f.quarter||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({quarter:ev.target.value});},style:selStyle},
       [e('option',{key:'all',value:'all'},'All Q'),...QUARTERS.map(q=>e('option',{key:q,value:q},q))]
     ),
-    e('select',{value:f.month||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({month:ev.target.value})},style:{fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'}},
+    e('select',{value:f.month||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({month:ev.target.value});},style:selStyle},
       [e('option',{key:'all',value:'all'},'All months'),...MONTHS_LIST.map(m=>e('option',{key:m,value:m},m))]
     ),
-    p.showStatus!==false ? STATUSES.map(s=>e('span',{key:s,onClick:ev=>{ev.stopPropagation();upd({status:s})},style:{fontSize:9,padding:'1px 7px',border:(f.status||'all')===s?'0.5px solid #AFA9EC':'0.5px solid var(--color-border-tertiary)',borderRadius:20,cursor:'pointer',color:(f.status||'all')===s?'#534AB7':'var(--color-text-secondary)',background:(f.status||'all')===s?'#EEEDFE':'transparent'}},s==='all'?'All':s[0].toUpperCase()+s.slice(1))) : null
+    p.showStatus!==false ? STATUSES.map(s=>e('span',{key:s,onClick:ev=>{ev.stopPropagation();upd({status:s});},style:{fontSize:9,padding:'1px 7px',border:(f.status||'all')===s?'0.5px solid #AFA9EC':'0.5px solid var(--color-border-tertiary)',borderRadius:20,cursor:'pointer',color:(f.status||'all')===s?'#534AB7':'var(--color-text-secondary)',background:(f.status||'all')===s?'#EEEDFE':'transparent'}},s==='all'?'All':s[0].toUpperCase()+s.slice(1))) : null
   );
 }
 
@@ -1197,7 +1193,16 @@ function AddTaskModal(p){
   const [clientId,setClientId]=useState(p.clients[0]?.id||'');
   const [noClient,setNoClient]=useState(false);
   const [noPeriod,setNoPeriod]=useState(false);
-  const [period,setPeriod]=useState('Jun 2025');
+  const [period,setPeriod]=useState('');
+  const [periodYear,setPeriodYear]=useState('');
+  const [periodQ,setPeriodQ]=useState('');
+  const [periodM,setPeriodM]=useState('');
+  const buildPeriod=(yr,q,m)=>{
+    if(!yr){ setPeriod(''); return; }
+    if(q) setPeriod(q+' FY'+String(yr).slice(-2));
+    else if(m) setPeriod(m+' '+yr);
+    else setPeriod(String(yr));
+  };
   const [due,setDue]=useState('');
   const [prep,setPrep]=useState('PK');
   const [rev,setRev]=useState('RK');
@@ -1282,7 +1287,24 @@ function AddTaskModal(p){
           e('label',{style:{fontSize:10,color:'var(--color-text-tertiary)',display:'flex',alignItems:'center',gap:4,cursor:'pointer'}},
             e('input',{type:'checkbox',checked:noPeriod,onChange:ev=>setNoPeriod(ev.target.checked),style:{margin:0}}),'No period (one-off task)')
         ),
-        !noPeriod ? e('select',{style:inputStyle,value:period,onChange:ev=>setPeriod(ev.target.value)},periodOptions(false)) : null
+        !noPeriod ? e('div',{style:{display:'flex',gap:8}},
+          e('div',{style:{flex:1}},
+            e('input',{type:'number',style:{...inputStyle},placeholder:'Year e.g. 2025',value:periodYear,min:2000,max:2099,
+              onChange:ev=>{ setPeriodYear(ev.target.value); buildPeriod(ev.target.value,periodQ,periodM); }})
+          ),
+          e('div',{style:{flex:1}},
+            e('select',{style:inputStyle,value:periodQ,onChange:ev=>{ setPeriodQ(ev.target.value); buildPeriod(periodYear,ev.target.value,periodM); }},
+              [e('option',{key:'',value:''},'Quarter (opt.)'),
+               ...QUARTERS.map(q=>e('option',{key:q,value:q},q))]
+            )
+          ),
+          e('div',{style:{flex:1}},
+            e('select',{style:inputStyle,value:periodM,onChange:ev=>{ setPeriodM(ev.target.value); buildPeriod(periodYear,periodQ,ev.target.value); }},
+              [e('option',{key:'',value:''},'Month (opt.)'),
+               ...MONTHS_LIST.map(m=>e('option',{key:m,value:m},m))]
+            )
+          )
+        ) : null
       ),
 
       e('div',{style:{marginBottom:12}},e('label',{style:labelStyle},'Due date'),
@@ -1358,7 +1380,7 @@ function WorkTrackApp(p){
   const filtForTask = (rows, td) => {
     const f=getTaskFilter(td);
     let r=rows;
-    const hasPerFilter=(f.fy||'all')!=='all'||(f.quarter||'all')!=='all'||(f.month||'all')!=='all';
+    const hasPerFilter=!!f.year||(f.quarter||'all')!=='all'||(f.month||'all')!=='all';
     if(hasPerFilter) r=r.filter(x=>periodMatchesFilter(x.period, f));
     if((f.status||'all')!=='all') r=r.filter(x=>x.status===f.status);
     return r;
@@ -2093,7 +2115,9 @@ function WorkTrackApp(p){
       const tids=taskDefs.filter(t=>t.group===view).map(t=>t.id);
       return ct.filter(r=>tids.includes(r.tid));
     }
-    const teamMap2={raj:'RK',priya:'PK',aman:'AM'};
+    // Dynamic team map — keyed by person ID from People sheet
+    const teamMap2={};
+    TEAM.forEach(t=>{ teamMap2[t.id]=t.id; });
     if(teamMap2[view]){
       const mid=teamMap2[view];
       return ct.filter(x=>x.rev===mid||x.prep===mid).filter(x=>{
@@ -2169,7 +2193,8 @@ function WorkTrackApp(p){
         GroupedTasks(vm.td)
       );
     }
-    const teamMap={raj:TEAM[0],priya:TEAM[1],aman:TEAM[2]};
+    const teamMap={};
+    TEAM.forEach(t=>{ teamMap[t.id]=t; });
     if(teamMap[view]){
       const member=teamMap[view];
       return e(React.Fragment,null,
@@ -2219,7 +2244,7 @@ function WorkTrackApp(p){
       e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Work type'),
       ...groups.map(g=>sbItem(g.id,g.label)),
       e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Team'),
-      sbItem('raj','Raj (you)'),sbItem('priya','Priya'),sbItem('aman','Aman'),
+      ...TEAM.map(t=>sbItem(t.id, t.id===CURRENT_USER ? t.name+' (you)' : t.name)),
       e('div',{style:{padding:'8px 12px',borderTop:'0.5px solid var(--color-border-tertiary)',marginTop:'auto'}},
         e('div',{style:{display:'flex',alignItems:'center',gap:7}},
           e(Av,{idx:0,label:(p.currentUser?p.currentUser.name:'RK').slice(0,2).toUpperCase(),size:24}),
