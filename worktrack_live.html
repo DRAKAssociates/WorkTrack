@@ -103,7 +103,7 @@ const msalConfig = {
 };
 
 const msalInstance = new msal.PublicClientApplication(msalConfig);
-const SCOPES = ['User.Read','Files.ReadWrite','Sites.ReadWrite.All'];
+const SCOPES = ['User.Read','Files.ReadWrite','Sites.ReadWrite.All','Files.ReadWrite.All'];
 
 // ── SharePoint Graph API helpers ─────────────────────────────
 async function getToken(){
@@ -153,19 +153,29 @@ async function getSharedFileUrl(){
 }
 
 async function getPrivateFileUrl(){
-  // Exact path in personal OneDrive (drakassociates-my.sharepoint.com/personal/deepak_drak_co_in)
-  const filePath = "Documents/Shared with Amruta/DRAK & Associates/WorkTrack Private/worktrack_private.xlsx";
+  // Hardcoded file ID from SharePoint share URL
+  // File: worktrack_private.xlsx in deepak_drak_co_in personal OneDrive
+  const PRIVATE_ITEM_ID = "IQBv3WgC-Km4RIApBNBlA8KWAU0ZZh61ZswVqZVm8S2EX3M";
   try{
-    const item = await graphGet("/me/drive/root:/"+encodeURIComponent(filePath).replace(/%2F/g,'/'));
-    const drive = await graphGet('/me/drive');
-    return {driveId: drive.id, itemId: item.id};
-  } catch(e){
-    // Fallback: try search
-    const drive = await graphGet('/me/drive');
-    const search = await graphGet("/me/drive/root/search(q='worktrack_private.xlsx')");
+    // Try via personal drive root by encoded share ID
+    // Decode the SharePoint item ID to a standard Graph item ID
+    const drive = await graphGet('/users/deepak_drak_co_in/drive');
+    const search = await graphGet("/users/deepak_drak_co_in/drive/root/search(q='worktrack_private.xlsx')");
     const file = search.value.find(f=>f.name==='worktrack_private.xlsx');
     if(file) return {driveId: drive.id, itemId: file.id};
-    throw new Error('Private file not found at: '+filePath);
+    throw new Error('Not found via user drive search');
+  } catch(e1){
+    try{
+      // Try via /me/drive with Files.ReadWrite.All scope
+      const drive = await graphGet('/me/drive');
+      const search = await graphGet("/me/drive/root/search(q='worktrack_private.xlsx')");
+      const file = search.value.find(f=>f.name==='worktrack_private.xlsx');
+      if(file) return {driveId: drive.id, itemId: file.id};
+      throw new Error('Not found via me drive search');
+    } catch(e2){
+      console.warn('Private file not accessible, continuing without it:', e2.message);
+      return null;
+    }
   }
 }
 
@@ -354,8 +364,10 @@ function App(){
       if(isReviewer){
         try{
           privateRef = await getPrivateFileUrl();
-          setPrivateFileRef(privateRef);
-          pWb = await downloadExcel(null, privateRef.itemId, privateRef.userId);
+          if(privateRef){
+            setPrivateFileRef(privateRef);
+            pWb = await downloadExcel(privateRef.driveId, privateRef.itemId, null);
+          }
           setPrivateWb(pWb);
         } catch(e){ console.warn('Private file not found, skipping',e); }
       }
