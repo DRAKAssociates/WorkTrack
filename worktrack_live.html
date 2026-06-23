@@ -916,20 +916,26 @@ function SubPanel(p){
 }
 
 // Combobox with inline "+ New ..." creation
+// State is managed by parent to avoid remount issues
 function CreatableSelect(p){
-  const [adding,setAdding]=useState(false);
-  const [draft,setDraft]=useState('');
+  // p.adding, p.setAdding, p.draft, p.setDraft must be passed from parent
   const inputStyle={fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
-  if(adding){
+  const confirm=()=>{if((p.draft||'').trim()){p.onCreate(p.draft.trim());p.setAdding(false);p.setDraft('');}};
+  if(p.adding){
     return e('div',{style:{display:'flex',gap:6}},
-      e('input',{style:inputStyle,autoFocus:true,placeholder:p.placeholder||'New value…',value:draft,onChange:ev=>setDraft(ev.target.value),
-        onKeyDown:ev=>{if(ev.key==='Enter'){if(draft.trim()){p.onCreate(draft.trim());setAdding(false);setDraft('');}} if(ev.key==='Escape'){setAdding(false);setDraft('');}}}),
-      e(Btn,{onClick:()=>{if(draft.trim()){p.onCreate(draft.trim());setAdding(false);setDraft('');}}},'Add'),
-      e(Btn,{onClick:()=>{setAdding(false);setDraft('');}},'✕')
+      e('input',{style:inputStyle,autoFocus:true,placeholder:p.placeholder||'New value…',value:p.draft||'',
+        onChange:ev=>p.setDraft(ev.target.value),
+        onKeyDown:ev=>{if(ev.key==='Enter') confirm(); if(ev.key==='Escape'){p.setAdding(false);p.setDraft('');}}}),
+      e(Btn,{onClick:confirm},'Add'),
+      e(Btn,{onClick:()=>{p.setAdding(false);p.setDraft('');}},'✕')
     );
   }
-  return e('select',{style:inputStyle,value:p.value,onChange:ev=>{ if(ev.target.value==='__new__'){setAdding(true);} else {p.onChange(ev.target.value);} }},
-    [...p.options.map(o=>e('option',{key:o.id,value:o.id},o.label)), e('option',{key:'__new__',value:'__new__'},'+ New '+p.newLabel+'…')]
+  return e('select',{style:inputStyle,value:p.value,onChange:ev=>{ if(ev.target.value==='__new__'){p.setAdding(true);} else {p.onChange(ev.target.value);} }},
+    [
+      p.options.length===0 ? e('option',{key:'__placeholder__',value:'',disabled:true},'— no '+p.newLabel+'s yet —') : null,
+      ...p.options.map(o=>e('option',{key:o.id,value:o.id},o.label)),
+      e('option',{key:'__new__',value:'__new__'},'+ New '+p.newLabel+'…')
+    ]
   );
 }
 
@@ -1274,6 +1280,11 @@ function AddTaskModal(p){
   const [rev,setRev]=useState(modalTeam[0]?.id||'');
   const [freq,setFreq]=useState('none');
   const [newIsCompliance,setNewIsCompliance]=useState(false);
+  // Inline creation state — kept in parent so remounts don't reset it
+  const [addingGroup,setAddingGroup]=useState(false);
+  const [groupDraft,setGroupDraft]=useState('');
+  const [addingClient,setAddingClient]=useState(false);
+  const [clientDraft,setClientDraft]=useState('');
 
   React.useEffect(()=>{
     if(!noClient && clientId && mode==='assign' && taskTypeId){
@@ -1324,6 +1335,7 @@ function AddTaskModal(p){
         e('div',{style:{display:'flex',gap:10,marginBottom:12}},
           e('div',{style:{flex:1}},e('label',{style:labelStyle},'Work category'),
             e(CreatableSelect,{value:newGroup,options:p.groups,newLabel:'category',placeholder:'e.g. ROC / MCA',
+              adding:addingGroup,setAdding:setAddingGroup,draft:groupDraft,setDraft:setGroupDraft,
               onChange:setNewGroup,onCreate:label=>{const g=p.onCreateGroup(label); setNewGroup(g.id);}})),
           e('div',{style:{flex:1}},e('label',{style:labelStyle},'Bucket'),
             e('select',{style:inputStyle,value:newBucket,onChange:ev=>setNewBucket(ev.target.value)},BUCKETS.map(b=>e('option',{key:b.id,value:b.id},b.label))))
@@ -1351,6 +1363,7 @@ function AddTaskModal(p){
           options:p.clients.map(c=>({id:c.id,label:c.name})),
           newLabel:'client',
           placeholder:'e.g. Patel & Co',
+          adding:addingClient,setAdding:setAddingClient,draft:clientDraft,setDraft:setClientDraft,
           onChange:setClientId,
           onCreate:name=>{const c=p.onAddClient(name,'monthly'); if(c) setClientId(c.id);}
         }) : null
