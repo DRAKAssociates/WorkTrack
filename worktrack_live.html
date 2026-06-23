@@ -1313,7 +1313,6 @@ function AddTaskModal(p){
       p.onAddAssignment({id:uid(),tid:newId,cid:finalClientId,period:finalPeriod,due,prep,rev,
         pi:pIdx>=0?pIdx:0,ri:rIdx>=0?rIdx:0,
         status:'pending',od:false,freq:finalClientId?freq:'none',st:[]});
-      }
     } else {
       if(!taskTypeId){ setFormError('Please select a task type.'); return; }
       if(!due){ setFormError('Due date is required.'); return; }
