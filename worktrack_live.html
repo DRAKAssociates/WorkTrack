@@ -651,7 +651,7 @@ function SaveIndicator(p){
 
 
 const AVC = ['#534AB7','#0F6E56','#993C1D','#185FA5','#854F0B'];
-const stLabel = s => ({pending:'Pending',review:'In review',approved:'Approved',done:'Done'}[s]||s);
+const stLabel = s => ({pending:'Pending',review:'In review',approved:'Approved',done:'Done',cancelled:'Cancelled'}[s]||s);
 const initials = name => name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
 const uid = () => Math.random().toString(36).slice(2,9);
 
@@ -935,12 +935,14 @@ function periodToFY(period){
 
 // ---------- Excel import/export ----------
 // Reference 1/2/3 columns are only meaningful for Assessment-bucket tasks; leave blank for other rows.
-const EXCEL_COLUMNS=['Client','Task Type','Work Category','Bucket','Period','Due Date','Preparer','Reviewer','Status','Frequency','Filed Date','Ack Number','FY','Reference 1','Reference 2','Reference 3'];
+const EXCEL_COLUMNS=['Client','Task Type','Work Category','Bucket','Period','Due Date','Preparer','Reviewer','Status','Frequency','Filed Date','Ack Number','FY','Reference 1','Reference 2','Reference 3','Next Hearing','Hearing Note','Closed Without Approval','Cancelled'];
 
-function rowToExcelRecord(r, taskDefs, clients, groups){
+function rowToExcelRecord(r, taskDefs, clients, groups, people){
   const td=taskDefs.find(t=>t.id===r.tid)||{};
   const cdef=clients.find(c=>c.id===r.cid);
   const grp=groups.find(g=>g.id===td.group);
+  const prepName = (people&&people.find(p=>p.id===r.prep)?.name) || r.prep || '';
+  const revName  = (people&&people.find(p=>p.id===r.rev)?.name)  || r.rev  || '';
   return {
     'Client': cdef ? cdef.name : (r.cid ? r.cid : ''),
     'Task Type': td.label || r.tid,
@@ -948,8 +950,8 @@ function rowToExcelRecord(r, taskDefs, clients, groups){
     'Bucket': td.bucket||'',
     'Period': r.period||'',
     'Due Date': r.due||'',
-    'Preparer': r.prep||'',
-    'Reviewer': r.rev||'',
+    'Preparer': prepName,
+    'Reviewer': revName,
     'Status': stLabel(r.status),
     'Frequency': r.freq||'none',
     'Filed Date': r.filedDate||'',
@@ -957,16 +959,35 @@ function rowToExcelRecord(r, taskDefs, clients, groups){
     'FY': r.fy||'',
     'Reference 1': r.ref1||'',
     'Reference 2': r.ref2||'',
-    'Reference 3': r.ref3||''
+    'Reference 3': r.ref3||'',
+    'Next Hearing': r.nextHearing||'',
+    'Hearing Note': r.hearingNote||'',
+    'Closed Without Approval': r.closedWithoutReview ? 'Yes' : '',
+    'Cancelled': r.status==='cancelled' ? 'Yes'+(r.resignNote?' — '+r.resignNote:'') : ''
   };
 }
 
-function exportToExcel(rows, taskDefs, clients, groups, filename){
-  const data=rows.map(r=>rowToExcelRecord(r,taskDefs,clients,groups));
+function exportToExcel(rows, taskDefs, clients, groups, people, ct, filename){
+  const data=rows.map(r=>rowToExcelRecord(r,taskDefs,clients,groups,people));
   const ws=XLSX.utils.json_to_sheet(data,{header:EXCEL_COLUMNS});
   ws['!cols']=EXCEL_COLUMNS.map(c=>({wch:Math.max(12,c.length+2)}));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Tasks');
+  // HearingLog sheet — full audit trail
+  const allLogs=(ct||rows).flatMap(r=>(r.hearingLog||[]).map(h=>({
+    'Assignment ID':r.id,
+    'Client':(clients.find(c=>c.id===r.cid)||{}).name||r.cid||'',
+    'Task Type':(taskDefs.find(t=>t.id===r.tid)||{}).label||r.tid||'',
+    'Previous Date':h.prevDate||'',
+    'New Date':h.newDate||'',
+    'Note':h.note||'',
+    'Changed On':h.changedOn||'',
+    'Changed By':(people&&people.find(p=>p.id===h.changedBy)?.name)||h.changedBy||''
+  })));
+  if(allLogs.length>0){
+    const hlWs=XLSX.utils.json_to_sheet(allLogs);
+    XLSX.utils.book_append_sheet(wb,hlWs,'Hearing Log');
+  }
   XLSX.writeFile(wb,filename);
 }
 
@@ -1007,6 +1028,8 @@ function parseExcelRows(sheetRows){
     const ref1=(row['Reference 1']||'').toString().trim();
     const ref2=(row['Reference 2']||'').toString().trim();
     const ref3=(row['Reference 3']||'').toString().trim();
+    const nextHearing=(row['Next Hearing']||'').toString().trim();
+    const hearingNote=(row['Hearing Note']||'').toString().trim();
 
     if(!taskLabel) errors.push('Task Type is required');
     if(!due) errors.push('Due Date is required');
@@ -1015,9 +1038,11 @@ function parseExcelRows(sheetRows){
     const freq=FREQ_VALID.includes(freqRaw)?freqRaw:'none';
 
     parsed.push({
-      rowNum: idx+2, // +2 because row 1 is header, sheet rows are 0-indexed
+      rowNum: idx+2,
       clientName, taskLabel, workCategory, bucket, period: period||null, due, prep, rev,
-      status, freq, filedDate, ackNo, fy, ref1, ref2, ref3, errors
+      status, freq, filedDate, ackNo, fy, ref1, ref2, ref3,
+      nextHearing: nextHearing||undefined, hearingNote: hearingNote||undefined,
+      errors
     });
   });
   return parsed;
@@ -1025,7 +1050,7 @@ function parseExcelRows(sheetRows){
 
 function Av(p){return e('div',{style:{width:p.size||20,height:p.size||20,borderRadius:'50%',background:AVC[p.idx%5],fontSize:(p.size||20)*0.4,fontWeight:500,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}},p.label)}
 function Pill(p){const map={'t':{bg:'var(--color-background-secondary)',c:'var(--color-text-secondary)'},'d':{bg:'#EAF3DE',c:'#27500A'},'p':{bg:'#FAC775',c:'#412402'},'b':{bg:'#F7C1C1',c:'#501313'},'r':{bg:'#B5D4F4',c:'#042C53'}};const s=map[p.k];return e('span',{style:{fontSize:9,padding:'2px 7px',borderRadius:20,background:s.bg,color:s.c,whiteSpace:'nowrap'}},p.children)}
-function St(p){const map={pending:{bg:'#FAC775',c:'#412402'},review:{bg:'#B5D4F4',c:'#042C53'},approved:{bg:'#D4BFFF',c:'#2E0F6E'},done:{bg:'#C0DD97',c:'#173404'}};const s=map[p.status]||map.pending;return e('span',{style:{fontSize:9,padding:'2px 6px',borderRadius:20,background:s.bg,color:s.c,whiteSpace:'nowrap'}},stLabel(p.status))}
+function St(p){const map={pending:{bg:'#FAC775',c:'#412402'},review:{bg:'#B5D4F4',c:'#042C53'},approved:{bg:'#D4BFFF',c:'#2E0F6E'},done:{bg:'#C0DD97',c:'#173404'},cancelled:{bg:'#E8E8E8',c:'#555555'}};const s=map[p.status]||map.pending;return e('span',{style:{fontSize:9,padding:'2px 6px',borderRadius:20,background:s.bg,color:s.c,whiteSpace:'nowrap'}},stLabel(p.status))}
 function Chk(p){
   const st=p.state || (p.done?'done':'pending');
   const styleMap={
@@ -1242,31 +1267,57 @@ function ExcelImportModal(p){
 function BulkCreateModal(p){
   const td=p.taskDef;
   const rowsForTask=p.ct.filter(x=>x.tid===td.id && x.cid);
-  // group by client, take the most recent row per client as reference
   const byClient={};
-  rowsForTask.forEach(r=>{ if(!byClient[r.cid] || (r.period||'')>(byClient[r.cid].period||'')) byClient[r.cid]=r; });
+  rowsForTask.forEach(r=>{ if(!byClient[r.cid]||(r.period||'')>(byClient[r.cid].period||'')) byClient[r.cid]=r; });
 
-  const [monthIdx,setMonthIdx]=useState(5); // default June
-  const [year,setYear]=useState(2026);
+  const modalTeam = (p.team&&p.team.length) ? p.team : [];
+  const [monthIdx,setMonthIdx]=useState(new Date().getMonth());
+  // Derive calendar year from FY selection — default current FY
+  const now=new Date();
+  const curFY = now.getMonth()>=3 ? now.getFullYear() : now.getFullYear()-1; // Apr start
+  const [fyStart,setFyStart]=useState(curFY); // e.g. 2025 for FY25-26
+  const calYear = monthIdx>=3 ? fyStart : fyStart+1; // Apr-Mar = fyStart; Jan-Mar = fyStart+1
+  const fyLabel = 'FY'+String(fyStart).slice(-2)+'-'+String(fyStart+1).slice(-2);
+
+  const [defaultPrep,setDefaultPrep]=useState(modalTeam[0]?.id||'');
+  const [defaultRev,setDefaultRev]=useState(modalTeam[0]?.id||'');
   const [rows,setRows]=useState(null);
 
   const buildPreview=()=>{
     const out=[];
     p.clients.forEach(cl=>{
       const ref=byClient[cl.id];
-      const freq = ref ? ref.freq : 'monthly';
+      const freq = ref ? (ref.freq||'monthly') : 'monthly';
       const usedFreq = (freq && freq!=='none') ? freq : 'monthly';
-      const noPriorInstance = !ref;
-      const per=periodForMonth(monthIdx,year,usedFreq);
-      if(per===null) return; // not a due period for this client's frequency this month
-      // skip if this exact period already exists for this client+task
+      const per=periodForMonth(monthIdx,calYear,usedFreq);
+      if(per===null) return;
       const exists=p.ct.some(x=>x.tid===td.id && x.cid===cl.id && x.period===per);
       if(exists) return;
+
+      // Due date: shift previous due date forward by 1 month (monthly) or 3 months (quarterly/yearly)
+      // Falls back to 20th of the target month if no prior due date
+      let dueDateStr;
+      const prevDue = ref ? parseDueDate(ref.due) : null;
+      if(prevDue){
+        const monthsToAdd = usedFreq==='monthly' ? 1 : usedFreq==='quarterly' ? 3 : 12;
+        const shifted = new Date(prevDue);
+        shifted.setMonth(shifted.getMonth() + monthsToAdd);
+        // If day overflowed (e.g. Jan 31 + 1 month = Mar 3), clamp to last day of target month
+        dueDateStr = shifted.toISOString().slice(0,10);
+      } else {
+        // No prior task — default to 20th of the selected month
+        dueDateStr = new Date(calYear, monthIdx, 20).toISOString().slice(0,10);
+      }
+
       out.push({
         cid:cl.id, cname:cl.name, freq:usedFreq, period:per,
-        due: ref ? ref.due.replace(/^\d+/, '20') : '20', // best-effort same day-of-month
-        prep: ref?ref.prep:'PK', pi: ref?ref.pi:1, rev: ref?ref.rev:'RK', ri: ref?ref.ri:0,
-        noPriorInstance, selected:true
+        due: dueDateStr,
+        prevDue: ref?.due||null, // shown as hint
+        prep: ref ? ref.prep : defaultPrep,
+        pi:  ref ? ref.pi  : modalTeam.findIndex(t=>t.id===(ref?ref.prep:defaultPrep)),
+        rev:  ref ? ref.rev  : defaultRev,
+        ri:   ref ? ref.ri   : modalTeam.findIndex(t=>t.id===(ref?ref.rev:defaultRev)),
+        noPriorInstance: !ref, selected:true
       });
     });
     setRows(out);
@@ -1275,61 +1326,101 @@ function BulkCreateModal(p){
   const updateRow=(cid,patch)=>setRows(prev=>prev.map(r=>r.cid===cid?{...r,...patch}:r));
 
   const confirm=()=>{
-    const selected=rows.filter(r=>r.selected);
-    selected.forEach(r=>{
-      p.onCreate({id:uid(),tid:td.id,cid:r.cid,period:r.period,due:r.due,prep:r.prep,pi:r.pi,rev:r.rev,ri:r.ri,
-        status:'pending',od:false,freq:r.freq,st:[]});
+    rows.filter(r=>r.selected).forEach(r=>{
+      const pi=modalTeam.findIndex(t=>t.id===r.prep);
+      const ri=modalTeam.findIndex(t=>t.id===r.rev);
+      p.onCreate({id:uid(),tid:td.id,cid:r.cid,period:r.period,due:r.due,
+        prep:r.prep,pi:pi>=0?pi:0,rev:r.rev,ri:ri>=0?ri:0,
+        status:'pending',od:false,freq:r.freq,hearingLog:[],st:[]});
     });
     p.onClose();
   };
 
-  const labelStyle={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
-  const inputStyle={fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
+  const inp={fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',outline:'none'};
+  const lbl={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
+  const selStyle={...inp,width:'100%',fontSize:12,padding:'7px 9px'};
+
+  // FY options — last 3 and next 2 years
+  const fyOptions=[];
+  for(let y=curFY-2;y<=curFY+2;y++) fyOptions.push({value:y,label:'FY'+String(y).slice(-2)+'-'+String(y+1).slice(-2)});
 
   return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:20}},
-    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:520,maxHeight:'88vh',overflowY:'auto',boxShadow:'0 0 0 1px var(--color-border-tertiary)'}},
-      e('div',{style:{fontSize:15,fontWeight:500,color:'var(--color-text-primary)',marginBottom:4}},'Create '+td.label+' for all clients'),
-      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},'Generates one instance per assigned client based on each client\'s own recurrence frequency. Monthly clients get every month; quarterly and yearly clients only get an instance when this month is their period end.'),
+    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:600,maxHeight:'90vh',overflowY:'auto',boxShadow:'0 4px 24px rgba(0,0,0,0.15)'}},
+      e('div',{style:{fontSize:15,fontWeight:600,color:'var(--color-text-primary)',marginBottom:4}},'Create '+td.label+' for clients'),
+      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},'Select the period and assign people. Each client gets one task — already-existing period+client combinations are skipped.'),
 
       !rows ? e(React.Fragment,null,
-        e('div',{style:{display:'flex',gap:10,marginBottom:16}},
-          e('div',{style:{flex:1}},e('label',{style:labelStyle},'Month'),
-            e('select',{style:inputStyle,value:monthIdx,onChange:ev=>setMonthIdx(parseInt(ev.target.value))},
-              MONTH_NAMES.map((m,i)=>e('option',{key:m,value:i},m)))),
-          e('div',{style:{flex:1}},e('label',{style:labelStyle},'Year'),
-            e('input',{style:inputStyle,type:'number',value:year,onChange:ev=>setYear(parseInt(ev.target.value)||year)}))
+        // Period selection
+        e('div',{style:{fontSize:10,fontWeight:600,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8}},'Period'),
+        e('div',{style:{display:'flex',gap:10,marginBottom:12}},
+          e('div',{style:{flex:1}},
+            e('label',{style:lbl},'Financial Year'),
+            e('select',{style:selStyle,value:fyStart,onChange:ev=>setFyStart(parseInt(ev.target.value))},
+              fyOptions.map(f=>e('option',{key:f.value,value:f.value},f.label)))
+          ),
+          e('div',{style:{flex:1}},
+            e('label',{style:lbl},'Month'),
+            e('select',{style:selStyle,value:monthIdx,onChange:ev=>setMonthIdx(parseInt(ev.target.value))},
+              MONTH_NAMES.map((m,i)=>e('option',{key:m,value:i},m)))
+          )
         ),
-        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:16,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},
-          monthIsQuarterEnd(monthIdx)?'This month is a quarter end — quarterly clients will also be included.':'This month is not a quarter end — only monthly clients will be included.',
-          monthIsYearEnd(monthIdx)?' This month is also the year end — yearly (assessment) clients will be included too.':''
+        e('div',{style:{fontSize:10,color:'#534AB7',background:'#F7F6FE',border:'0.5px solid #AFA9EC',borderRadius:'var(--border-radius-md)',padding:'7px 10px',marginBottom:16}},
+          '📅 Period: '+fyLabel+' · '+MONTH_NAMES[monthIdx]+' '+calYear,
+          e('br'),
+          monthIsQuarterEnd(monthIdx) ? '✓ Quarter end — Q tasks included' : '— Not a quarter end, only monthly tasks',
+          monthIsYearEnd(monthIdx) ? '  ✓ Year end — annual tasks included' : ''
+        ),
+        // Default people
+        e('div',{style:{fontSize:10,fontWeight:600,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8}},'Default assignment (for clients with no prior task)'),
+        e('div',{style:{display:'flex',gap:10,marginBottom:20}},
+          e('div',{style:{flex:1}},
+            e('label',{style:lbl},'Preparer'),
+            e('select',{style:selStyle,value:defaultPrep,onChange:ev=>setDefaultPrep(ev.target.value)},
+              modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
+          ),
+          e('div',{style:{flex:1}},
+            e('label',{style:lbl},'Reviewer'),
+            e('select',{style:selStyle,value:defaultRev,onChange:ev=>setDefaultRev(ev.target.value)},
+              modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
+          )
         ),
         e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
           e(Btn,{onClick:p.onClose},'Cancel'),
           e(Btn,{pri:true,onClick:buildPreview},'Preview clients →')
         )
+
       ) : e(React.Fragment,null,
-        rows.length===0 ? e('div',{style:{padding:20,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No clients are due for '+MONTH_NAMES[monthIdx]+' '+year+' under their assigned frequency.') :
-        e('div',{style:{marginBottom:14}},
-          e('div',{style:{display:'grid',gridTemplateColumns:'18px 1fr 64px 90px 60px',gap:8,padding:'4px 6px',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'var(--color-text-tertiary)',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
-            e('div'),e('div'),e('div','Freq'),e('div','Period'),e('div','Due')
-          ),
-          rows.map(r=>e('div',{key:r.cid,style:{display:'grid',gridTemplateColumns:'18px 1fr 64px 90px 60px',gap:8,alignItems:'center',padding:'6px',borderBottom:'0.5px solid var(--color-border-tertiary)',background:r.noPriorInstance?'#FAEEDA':'transparent'}},
-            e('input',{type:'checkbox',checked:r.selected,onChange:ev=>updateRow(r.cid,{selected:ev.target.checked}),style:{margin:0}}),
-            e('div',null,
-              e('div',{style:{fontSize:12,color:'var(--color-text-primary)'}},r.cname),
-              r.noPriorInstance?e('div',{style:{fontSize:9,color:'#633806'}},'No prior instance — assumed monthly, confirm or adjust'):null
+        rows.length===0
+          ? e('div',{style:{padding:20,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No clients are due for '+MONTH_NAMES[monthIdx]+' '+calYear+' — all already exist or none match this frequency.')
+          : e('div',{style:{marginBottom:14}},
+              e('div',{style:{display:'grid',gridTemplateColumns:'20px 1fr 70px 100px 1fr 110px',gap:6,padding:'4px 6px',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'var(--color-text-tertiary)',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+                e('div'),e('div','Client'),e('div','Freq'),e('div','Period'),e('div','Due date'),e('div','Preparer')
+              ),
+              rows.map(r=>e('div',{key:r.cid,style:{display:'grid',gridTemplateColumns:'20px 1fr 70px 100px 1fr 110px',gap:6,alignItems:'center',padding:'6px',borderBottom:'0.5px solid var(--color-border-tertiary)',background:r.noPriorInstance?'#FAEEDA':'transparent'}},
+                e('input',{type:'checkbox',checked:r.selected,onChange:ev=>updateRow(r.cid,{selected:ev.target.checked}),style:{margin:0}}),
+                e('div',null,
+                  e('div',{style:{fontSize:11,color:'var(--color-text-primary)',fontWeight:500}},r.cname),
+                  r.noPriorInstance?e('div',{style:{fontSize:9,color:'#633806'}},'No prior task — using defaults'):null
+                ),
+                e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},r.freq),
+                e('input',{value:r.period,onChange:ev=>updateRow(r.cid,{period:ev.target.value}),style:{...inp,width:'100%'}}),
+                e('div',null,
+                  e('input',{type:'date',value:r.due,onChange:ev=>updateRow(r.cid,{due:ev.target.value}),style:{...inp,width:'100%'}}),
+                  r.prevDue ? e('div',{style:{fontSize:8,color:'var(--color-text-tertiary)',marginTop:2}},
+                    'Prev: '+r.prevDue+' +'+(r.freq==='monthly'?'1m':r.freq==='quarterly'?'3m':'12m')) : null
+                ),
+                e('select',{value:r.prep,onChange:ev=>updateRow(r.cid,{prep:ev.target.value}),style:{...inp,width:'100%'}},
+                  modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name.split(' ')[0])))
+              ))
             ),
-            e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},r.freq),
-            e('input',{value:r.period,onChange:ev=>updateRow(r.cid,{period:ev.target.value}),style:{fontSize:11,padding:'3px 5px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)'}}),
-            e('input',{value:r.due,onChange:ev=>updateRow(r.cid,{due:ev.target.value}),style:{fontSize:11,padding:'3px 5px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)'}})
-          ))
-        ),
-        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
-          e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},rows.filter(r=>r.selected).length+' of '+rows.length+' selected'),
+        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:12}},
+          e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},rows.filter(r=>r.selected).length+' of '+rows.length+' clients selected'),
           e('div',{style:{display:'flex',gap:8}},
             e(Btn,{onClick:()=>setRows(null)},'← Back'),
             e(Btn,{onClick:p.onClose},'Cancel'),
-            e(Btn,{pri:true,onClick:confirm},'Create '+rows.filter(r=>r.selected).length+' tasks')
+            rows.filter(r=>r.selected).length>0
+              ? e(Btn,{pri:true,onClick:confirm},'Create '+rows.filter(r=>r.selected).length+' tasks')
+              : null
           )
         )
       )
@@ -2127,7 +2218,9 @@ function WorkTrackApp(p){
         ri: TEAM.find(t=>t.id===r.rev)?TEAM.find(t=>t.id===r.rev).idx:0,
         status:r.status, od:false, freq:r.freq,
         filedDate:r.filedDate||undefined, ackNo:r.ackNo||undefined,
-        fy:r.fy||undefined, ref1:r.ref1||undefined, ref2:r.ref2||undefined, ref3:r.ref3||undefined
+        fy:r.fy||undefined, ref1:r.ref1||undefined, ref2:r.ref2||undefined, ref3:r.ref3||undefined,
+        nextHearing:r.nextHearing||undefined, hearingNote:r.hearingNote||undefined,
+        hearingLog:[], st:[]
       };
       if(mode==='replace'){
         const idx=nextCt.findIndex(x=>x.cid===cid && x.tid===tdef.id && x.period===r.period);
@@ -2745,8 +2838,8 @@ function WorkTrackApp(p){
     return ct;
   };
 
-  const handleExportVisible=()=>exportToExcel(getVisibleRows(), taskDefs, clients, groups, 'worktrack_visible_'+Date.now()+'.xlsx');
-  const handleExportAll=()=>exportToExcel(ct, taskDefs, clients, groups, 'worktrack_all_'+Date.now()+'.xlsx');
+  const handleExportVisible=()=>exportToExcel(getVisibleRows(), taskDefs, clients, groups, TEAM.map(t=>({id:t.id,name:t.name})), ct, 'worktrack_visible_'+Date.now()+'.xlsx');
+  const handleExportAll=()=>exportToExcel(ct, taskDefs, clients, groups, TEAM.map(t=>({id:t.id,name:t.name})), ct, 'worktrack_all_'+Date.now()+'.xlsx');
 
   const renderContent=()=>{
     if(view==='assessment'){
@@ -2858,7 +2951,7 @@ function WorkTrackApp(p){
   }) : null,
   bulkCreateTask ? e(BulkCreateModal,{
     taskDef:bulkCreateTask,
-    clients,ct,
+    clients,ct,team:TEAM,
     onClose:()=>setBulkCreateTask(null),
     onCreate:handleBulkCreate
   }) : null,
