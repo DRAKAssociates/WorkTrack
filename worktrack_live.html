@@ -591,7 +591,6 @@ function App(){
       e('div',{className:'login-card'},
         e('div',{className:'login-logo'},'WorkTrack'),
         e('div',{className:'login-sub'},'Who are you?'),
-        e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:12,textAlign:'center'}},'Reviewers — please use your own Microsoft account to sign in.'),
         e('div',{className:'picker-list'},
           preparers.map((p,i)=>e('div',{key:p.id,className:'picker-item',onClick:()=>pickPreparer(p)},
             e('div',{className:'picker-avatar',style:{background:AVC[i%5]}},p.name.slice(0,2).toUpperCase()),
