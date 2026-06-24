@@ -494,7 +494,9 @@ function App(){
   };
 
   const pickPreparer = (person) => {
-    setCurrentUser(prev=>({...prev, id:person.id, name:person.name, role:'preparer'}));
+    // Role is ALWAYS preparer here — reviewer identity requires MS login with reviewer email
+    // isReviewer stays false regardless of who is picked
+    setCurrentUser(prev=>({...prev, id:person.id, name:person.name, role:'preparer', isReviewer:false}));
     setPhase('app');
   };
 
@@ -581,11 +583,14 @@ function App(){
 
   // ── Preparer picker ───────────────────────────────────────
   if(phase==='preparer-pick'){
-    const preparers = (appData?.people||[]).filter(p=>p.role==='preparer');
+    // Only show people with no email — reviewers have emails in shared sheet and use MS login
+    // Even if someone picks a reviewer name, role is hardcoded to 'preparer' in pickPreparer
+    const preparers = (appData?.people||[]).filter(p=>!p.email);
     return e('div',{className:'login-screen'},
       e('div',{className:'login-card'},
         e('div',{className:'login-logo'},'WorkTrack'),
-        e('div',{className:'login-sub'},'Who are you today?'),
+        e('div',{className:'login-sub'},'Who are you?'),
+        e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:12,textAlign:'center'}},'Reviewers — please sign out and log in with your own Microsoft account.'),
         e('div',{className:'picker-list'},
           preparers.map((p,i)=>e('div',{key:p.id,className:'picker-item',onClick:()=>pickPreparer(p)},
             e('div',{className:'picker-avatar',style:{background:AVC[i%5]}},p.name.slice(0,2).toUpperCase()),
