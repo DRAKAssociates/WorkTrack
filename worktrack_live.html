@@ -2218,6 +2218,7 @@ function WorkTrackApp(p){
               return e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
                 e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'You are both preparer and reviewer.'),
                 r.status==='pending' ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-check','aria-hidden':'true'}),'Close') : null,
+                r.status==='pending' ? e(Btn,{onClick:()=>{ if(confirm('Close without approval? This will be flagged.')) closeWithoutReview(r.id); },style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-shield-x','aria-hidden':'true'}),'Close without approval') : null,
                 r.status==='done' ? e(Btn,{onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-corner-up-left','aria-hidden':'true'}),'Reopen') : null,
                 isReviewerUser && r.status!=='done' ? e(Btn,{onClick:()=>setReassignRow(r),style:{marginLeft:'auto'}},e('i',{className:'ti ti-users','aria-hidden':'true'}),'Reassign') : null,
                 isReviewerUser && r.status!=='done' ? e(Btn,{onClick:()=>setCancelRow(r),style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-ban','aria-hidden':'true'}),'Cancel') : null
@@ -2228,6 +2229,8 @@ function WorkTrackApp(p){
               // --- PREPARER ACTIONS ---
               isPreparer && r.status==='pending'
                 ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-arrow-right','aria-hidden':'true'}),'Submit for review') : null,
+              isPreparer && r.status==='pending'
+                ? e(Btn,{onClick:()=>{ if(confirm('Close without reviewer approval? This will be flagged in the tracker.')) closeWithoutReview(r.id); },style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-shield-x','aria-hidden':'true'}),'Close without approval') : null,
               isPreparer && r.status==='review'
                 ? e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)',fontStyle:'italic'}},'Awaiting reviewer approval…') : null,
               isPreparer && r.status==='approved'
