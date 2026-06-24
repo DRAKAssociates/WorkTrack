@@ -1253,192 +1253,287 @@ function AddClientModal(p){
   );
 }
 
-// ---------- Add Task modal ----------
+// ---------- Add Task modal — unified single flow ----------
 function AddTaskModal(p){
-  // p.team = real team from People sheet (passed from WorkTrackApp)
-  const modalTeam = (p.team && p.team.length) ? p.team : [{id:'RK',name:'Raj Kumar',idx:0},{id:'PK',name:'Priya K',idx:1},{id:'AM',name:'Aman M',idx:2}];
-  const [mode,setMode]=useState('assign');
-  const [taskTypeId,setTaskTypeId]=useState(p.taskDefs[0]?.id||'');
-  const [newLabel,setNewLabel]=useState('');
-  const [newGroup,setNewGroup]=useState(p.groups[0]?.id||'__none__');
-  const [newBucket,setNewBucket]=useState('recurring');
-  const [clientId,setClientId]=useState(p.clients[0]?.id||'');
-  const [noClient,setNoClient]=useState(false);
-  const [noPeriod,setNoPeriod]=useState(false);
-  const [period,setPeriod]=useState('');
-  const [periodYear,setPeriodYear]=useState('');
-  const [periodQ,setPeriodQ]=useState('');
-  const [periodM,setPeriodM]=useState('');
-  const buildPeriod=(yr,q,m)=>{
-    if(!yr){ setPeriod(''); return; }
-    if(q) setPeriod(q+' FY'+String(yr).slice(-2));
-    else if(m) setPeriod(m+' '+yr);
-    else setPeriod(String(yr));
+  const modalTeam = (p.team && p.team.length) ? p.team : [];
+
+  // ── Task type ──
+  const [taskTypeId, setTaskTypeId] = useState('');          // '' = new type being created
+  const [taskSearch, setTaskSearch]  = useState('');         // search text in task type field
+  const [showTaskDrop, setShowTaskDrop] = useState(false);
+  // New task type fields (only shown when taskTypeId === '')
+  const [newTaskLabel, setNewTaskLabel] = useState('');
+  const [newGroup, setNewGroup]   = useState(p.groups[0]?.id||'');
+  const [newBucket, setNewBucket] = useState('recurring');
+  const [isCompliance, setIsCompliance] = useState(false);
+  const [isAssessment, setIsAssessment] = useState(false);
+  // Group inline creation
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [groupDraft,  setGroupDraft]  = useState('');
+
+  // ── Client ──
+  const [clientId, setClientId] = useState('');
+  const [noClient, setNoClient] = useState(false);
+  const [addingClient, setAddingClient] = useState(false);
+  const [clientDraft,  setClientDraft]  = useState('');
+
+  // ── Period ──
+  const [fy,    setFy]    = useState('');   // e.g. FY25-26
+  const [periodQ, setPeriodQ] = useState('');
+  const [periodM, setPeriodM] = useState('');
+  const [noPeriod, setNoPeriod] = useState(false);
+
+  // ── Due date ──
+  const [due, setDue] = useState('');
+
+  // ── Recurring ──
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [freq, setFreq] = useState('monthly');
+
+  // ── People ──
+  const [prep, setPrep] = useState(modalTeam[0]?.id||'');
+  const [rev,  setRev]  = useState(modalTeam[0]?.id||'');
+
+  // ── Error ──
+  const [formError, setFormError] = useState('');
+
+  const lbl  = {fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
+  const inp  = {fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
+  const wrap = {marginBottom:14};
+  const sec  = {fontSize:10,fontWeight:600,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:10,marginTop:18,paddingBottom:4,borderBottom:'0.5px solid var(--color-border-tertiary)'};
+
+  // Derive period string from FY + Q + M
+  const buildPeriod=()=>{
+    if(!fy) return null;
+    const fyShort=fy.replace('FY','');  // e.g. "25-26"
+    if(periodM) return periodM+' 20'+fyShort.slice(0,2);  // e.g. "Jun 2025"
+    if(periodQ) return periodQ+' FY'+fyShort.slice(-2);   // e.g. "Q1 FY26"
+    return fy;
   };
-  const [due,setDue]=useState('');
-  const [prep,setPrep]=useState(modalTeam[0]?.id||'');
-  const [rev,setRev]=useState(modalTeam[0]?.id||'');
-  const [freq,setFreq]=useState('none');
-  const [newIsCompliance,setNewIsCompliance]=useState(false);
-  const [formError,setFormError]=useState('');
-  // Inline creation state — kept in parent so remounts don't reset it
-  const [addingGroup,setAddingGroup]=useState(false);
-  const [groupDraft,setGroupDraft]=useState('');
-  const [addingClient,setAddingClient]=useState(false);
-  const [clientDraft,setClientDraft]=useState('');
 
-  React.useEffect(()=>{
-    if(!noClient && clientId && mode==='assign' && taskTypeId){
-      const existing=p.ct.find(x=>x.cid===clientId && x.tid===taskTypeId);
-      setFreq(existing ? (existing.freq||'none') : 'none');
-    }
-  },[clientId,noClient,taskTypeId,mode]);
+  // Resolve selected task type object
+  const selTaskDef = taskTypeId ? p.taskDefs.find(t=>t.id===taskTypeId) : null;
+  const isNewType  = !taskTypeId;
 
-  const labelStyle={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
-  const inputStyle={fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
-  const fieldWrap={marginBottom:12};
+  // Filtered task type list for dropdown
+  const filteredDefs = p.taskDefs.filter(t=>t.label.toLowerCase().includes(taskSearch.toLowerCase()));
 
   const handleSubmit=()=>{
     setFormError('');
-    const finalClientId = noClient ? null : (clientId||null);
-    const finalPeriod = noPeriod ? null : (period||null);
-    if(mode==='newtype'){
-      if(!newLabel.trim()){ setFormError('Task type name is required.'); return; }
-      if(!due){ setFormError('Due date is required.'); return; }
-      const resolvedGroup = (newGroup && newGroup!=='__none__') ? newGroup : null;
-      if(!resolvedGroup){ setFormError('Work category is required — select one or create a new one.'); return; }
-      const newId='custom_'+uid();
-      p.onCreateTaskType({id:newId,label:newLabel.trim(),group:resolvedGroup,bucket:newBucket,isCompliance:newIsCompliance});
-      const pIdx=modalTeam.findIndex(t=>t.id===prep); const rIdx=modalTeam.findIndex(t=>t.id===rev);
-      p.onAddAssignment({id:uid(),tid:newId,cid:finalClientId,period:finalPeriod,due,prep,rev,
-        pi:pIdx>=0?pIdx:0,ri:rIdx>=0?rIdx:0,
-        status:'pending',od:false,freq:finalClientId?freq:'none',st:[]});
-    } else {
-      if(!taskTypeId){ setFormError('Please select a task type.'); return; }
-      if(!due){ setFormError('Due date is required.'); return; }
-      const pIdx=modalTeam.findIndex(t=>t.id===prep); const rIdx=modalTeam.findIndex(t=>t.id===rev);
-      p.onAddAssignment({id:uid(),tid:taskTypeId,cid:finalClientId,period:finalPeriod,due,prep,rev,
-        pi:pIdx>=0?pIdx:0,ri:rIdx>=0?rIdx:0,
-        status:'pending',od:false,freq:finalClientId?freq:'none',st:[]});
+    // Validate task type
+    if(isNewType && !newTaskLabel.trim()){ setFormError('Enter a task type name.'); return; }
+    if(isNewType && !newGroup){ setFormError('Select or create a work category.'); return; }
+    if(!due){ setFormError('Due date is required.'); return; }
+    if(!noClient && !clientId){ setFormError('Select or add a client, or tick "Internal task".'); return; }
+
+    // Auto-create task type if new
+    let tid = taskTypeId;
+    if(isNewType){
+      tid = 'tt_'+uid();
+      const bucket = isAssessment ? 'assessment' : newBucket;
+      p.onCreateTaskType({id:tid, label:newTaskLabel.trim(), group:newGroup, bucket, isCompliance:(isCompliance||isAssessment)});
     }
+
+    const finalPeriod = noPeriod ? null : buildPeriod();
+    const finalClientId = noClient ? null : clientId;
+    const pIdx = modalTeam.findIndex(t=>t.id===prep);
+    const rIdx = modalTeam.findIndex(t=>t.id===rev);
+    p.onAddAssignment({
+      id:uid(), tid, cid:finalClientId, period:finalPeriod, due,
+      prep, rev, pi:pIdx>=0?pIdx:0, ri:rIdx>=0?rIdx:0,
+      status:'pending', od:false,
+      freq: isRecurring ? freq : 'none',
+      st:[]
+    });
     p.onClose();
   };
 
-  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:20}},
-    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:440,maxHeight:'88vh',overflowY:'auto',boxShadow:'0 0 0 1px var(--color-border-tertiary)'}},
-      e('div',{style:{fontSize:15,fontWeight:500,color:'var(--color-text-primary)',marginBottom:4}},'Add task'),
-      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:14}},'Assign an existing task type to a client, or create a brand new task type.'),
-      formError ? e('div',{style:{fontSize:11,color:'#712B13',background:'#FAECE7',border:'0.5px solid #F0997B',borderRadius:'var(--border-radius-md)',padding:'7px 10px',marginBottom:12}},
-        e('i',{className:'ti ti-alert-circle',style:{marginRight:5},'aria-hidden':'true'}), formError
-      ) : null,
-      e('div',{style:{display:'flex',gap:6,marginBottom:16}},
-        e('div',{onClick:()=>{setMode('assign');setFormError('');},style:{flex:1,textAlign:'center',padding:'7px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='assign'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='assign'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='assign'?500:400}},'Assign existing task'),
-        e('div',{onClick:()=>{setMode('newtype');setFormError('');},style:{flex:1,textAlign:'center',padding:'7px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='newtype'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='newtype'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='newtype'?500:400}},'Create new task type')
+  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}},
+    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:480,maxHeight:'92vh',overflowY:'auto',boxShadow:'0 4px 32px rgba(0,0,0,0.18)'}},
+
+      // Header
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}},
+        e('div',{style:{fontSize:15,fontWeight:600,color:'var(--color-text-primary)'}},'Add task'),
+        e('button',{onClick:p.onClose,style:{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--color-text-tertiary)',padding:4}},'✕')
       ),
 
-      mode==='newtype' ? e(React.Fragment,null,
-        e('div',{style:fieldWrap},e('label',{style:labelStyle},'New task type name'),
-          e('input',{style:inputStyle,placeholder:'e.g. PT Return Filing',value:newLabel,onChange:ev=>setNewLabel(ev.target.value)})),
-        e('div',{style:{display:'flex',gap:10,marginBottom:12}},
-          e('div',{style:{flex:1}},e('label',{style:labelStyle},'Work category'),
-            p.groups.length===0 && !addingGroup
+      // Error banner
+      formError ? e('div',{style:{fontSize:11,color:'#712B13',background:'#FAECE7',border:'0.5px solid #F0997B',borderRadius:'var(--border-radius-md)',padding:'7px 10px',marginBottom:14}},
+        '⚠ ', formError) : null,
+
+      // ── SECTION: Task type ──
+      e('div',{style:sec},'Task type'),
+
+      // Searchable task type selector
+      e('div',{style:{...wrap,position:'relative'}},
+        e('label',{style:lbl},'Task type ', e('span',{style:{color:'var(--color-text-tertiary)',fontWeight:400}},'— select existing or type to create new')),
+        selTaskDef
+          ? e('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'7px 10px',border:'0.5px solid #534AB7',borderRadius:'var(--border-radius-md)',background:'#F7F6FE'}},
+              e('span',{style:{flex:1,fontSize:12,color:'#534AB7',fontWeight:500}},selTaskDef.label),
+              e('span',{style:{fontSize:9,padding:'2px 6px',background:'#EEEDFE',color:'#534AB7',borderRadius:10}},selTaskDef.bucket),
+              e('button',{onClick:()=>{setTaskTypeId('');setTaskSearch('');setShowTaskDrop(true);},style:{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'var(--color-text-tertiary)',padding:0}},'change ✕')
+            )
+          : e('div',null,
+              e('input',{style:inp, placeholder:'Search task types or type a new name…',
+                value:taskSearch, autoFocus:true,
+                onChange:ev=>{setTaskSearch(ev.target.value);setShowTaskDrop(true);},
+                onFocus:()=>setShowTaskDrop(true),
+                onBlur:()=>setTimeout(()=>setShowTaskDrop(false),150)
+              }),
+              showTaskDrop && e('div',{style:{position:'absolute',top:'100%',left:0,right:0,background:'var(--color-background-primary)',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',boxShadow:'0 4px 16px rgba(0,0,0,0.12)',zIndex:100,maxHeight:180,overflowY:'auto',marginTop:2}},
+                filteredDefs.length===0 && !taskSearch
+                  ? e('div',{style:{padding:'10px 12px',fontSize:11,color:'var(--color-text-tertiary)'}},'No task types yet — type a name to create one')
+                  : null,
+                filteredDefs.map(t=>e('div',{key:t.id,
+                  onMouseDown:()=>{setTaskTypeId(t.id);setTaskSearch(t.label);setShowTaskDrop(false);setIsCompliance(t.isCompliance);setIsAssessment(t.bucket==='assessment');setNewBucket(t.bucket);},
+                  style:{padding:'8px 12px',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:8,borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+                  e('span',{style:{flex:1}},t.label),
+                  e('span',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},t.bucket)
+                )),
+                taskSearch.trim() && !filteredDefs.some(t=>t.label.toLowerCase()===taskSearch.trim().toLowerCase())
+                  ? e('div',{onMouseDown:()=>{setNewTaskLabel(taskSearch.trim());setShowTaskDrop(false);},
+                      style:{padding:'8px 12px',fontSize:12,cursor:'pointer',color:'#534AB7',fontWeight:500,background:'#F7F6FE',display:'flex',alignItems:'center',gap:6}},
+                      e('i',{className:'ti ti-plus','aria-hidden':'true'}), 'Create "'+taskSearch.trim()+'" as new task type')
+                  : null
+              )
+            )
+      ),
+
+      // New task type fields — shown only when creating new
+      isNewType && newTaskLabel ? e(React.Fragment,null,
+        e('div',{style:{background:'#F7F6FE',border:'0.5px solid #AFA9EC',borderRadius:'var(--border-radius-md)',padding:'10px 12px',marginBottom:14}},
+          e('div',{style:{fontSize:10,color:'#534AB7',fontWeight:600,marginBottom:10}},'New task type: '+newTaskLabel),
+          // Category
+          e('div',{style:{marginBottom:10}},
+            e('label',{style:lbl},'Work category'),
+            addingGroup
               ? e('div',{style:{display:'flex',gap:6}},
-                  e('input',{
-                    style:inputStyle,autoFocus:true,placeholder:'e.g. GST, Income Tax…',
-                    value:groupDraft,onChange:ev=>setGroupDraft(ev.target.value),
-                    onKeyDown:ev=>{
-                      if(ev.key==='Enter'&&groupDraft.trim()){const g=p.onCreateGroup(groupDraft.trim());setNewGroup(g.id);setGroupDraft('');}
-                      if(ev.key==='Escape') setGroupDraft('');
-                    }
+                  e('input',{style:inp,autoFocus:true,placeholder:'e.g. GST, Income Tax, ROC…',value:groupDraft,
+                    onChange:ev=>setGroupDraft(ev.target.value),
+                    onKeyDown:ev=>{if(ev.key==='Enter'&&groupDraft.trim()){const g=p.onCreateGroup(groupDraft.trim());setNewGroup(g.id);setAddingGroup(false);setGroupDraft('');}
+                      if(ev.key==='Escape'){setAddingGroup(false);setGroupDraft('');}}
                   }),
-                  e(Btn,{onClick:()=>{if(groupDraft.trim()){const g=p.onCreateGroup(groupDraft.trim());setNewGroup(g.id);setGroupDraft('');}}}, 'Add')
+                  e(Btn,{onClick:()=>{if(groupDraft.trim()){const g=p.onCreateGroup(groupDraft.trim());setNewGroup(g.id);setAddingGroup(false);setGroupDraft('');}}}, 'Add'),
+                  e(Btn,{onClick:()=>{setAddingGroup(false);setGroupDraft('');}}, '✕')
                 )
-              : e(React.Fragment,null,
-                  e(CreatableSelect,{value:newGroup,options:p.groups,newLabel:'category',placeholder:'e.g. ROC / MCA',
-                    adding:addingGroup,setAdding:setAddingGroup,draft:groupDraft,setDraft:setGroupDraft,
-                    onChange:setNewGroup,onCreate:label=>{const g=p.onCreateGroup(label); setNewGroup(g.id);}}),
-                  newGroup && newGroup!=='__none__' && p.groups.find(g=>g.id===newGroup)
-                    ? e('div',{style:{fontSize:9,color:'#0F6E56',marginTop:3}}, '✓ '+p.groups.find(g=>g.id===newGroup).label)
-                    : null
+              : e('select',{style:inp,value:newGroup,onChange:ev=>{ if(ev.target.value==='__new__'){setAddingGroup(true);}else{setNewGroup(ev.target.value);}}},
+                  p.groups.length===0 ? e('option',{key:'_ph',value:'',disabled:true},'— create a category below —') : null,
+                  ...p.groups.map(g=>e('option',{key:g.id,value:g.id},g.label)),
+                  e('option',{key:'__new__',value:'__new__'},'+ New category…')
                 )
           ),
-          e('div',{style:{flex:1}},e('label',{style:labelStyle},'Bucket'),
-            e('select',{style:inputStyle,value:newBucket,onChange:ev=>setNewBucket(ev.target.value)},BUCKETS.map(b=>e('option',{key:b.id,value:b.id},b.label))))
-        ),
-        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:8,padding:'7px 9px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},'This creates a reusable task type. Fill in the assignment fields below to also create the first instance now.'),
-        e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:6,marginBottom:12,cursor:'pointer',color:'var(--color-text-secondary)'}},
-          e('input',{type:'checkbox',checked:newIsCompliance,onChange:ev=>setNewIsCompliance(ev.target.checked),style:{margin:0}}),
-          'Track this as a statutory compliance filing (shows in Compliance history)'
+          // Bucket
+          e('div',{style:{display:'flex',gap:10,marginBottom:10}},
+            e('div',{style:{flex:1}},
+              e('label',{style:lbl},'Bucket'),
+              e('select',{style:inp,value:newBucket,onChange:ev=>{setNewBucket(ev.target.value);if(ev.target.value==='assessment'){setIsAssessment(true);setIsCompliance(true);}else{setIsAssessment(false);}}},
+                BUCKETS.map(b=>e('option',{key:b.id,value:b.id},b.label)))
+            )
+          ),
+          // Flags
+          e('div',{style:{display:'flex',gap:16}},
+            e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:5,cursor:'pointer',color:'var(--color-text-secondary)'}},
+              e('input',{type:'checkbox',checked:isCompliance,onChange:ev=>{setIsCompliance(ev.target.checked);},style:{margin:0}}),
+              'Compliance filing'),
+            e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:5,cursor:'pointer',color:'var(--color-text-secondary)'}},
+              e('input',{type:'checkbox',checked:isAssessment,onChange:ev=>{setIsAssessment(ev.target.checked);if(ev.target.checked){setIsCompliance(true);setNewBucket('assessment');}},style:{margin:0}}),
+              'Assessment tracker')
+          )
         )
       ) : null,
 
-      e('div',{style:{fontSize:11,fontWeight:500,color:'var(--color-text-primary)',margin:'4px 0 10px',borderTop:'0.5px solid var(--color-border-tertiary)',paddingTop:12}},'Assignment details'),
+      // ── SECTION: Assignment ──
+      e('div',{style:sec},'Assignment'),
 
-      mode==='assign' ? e('div',{style:fieldWrap},e('label',{style:labelStyle},'Task type'),
-        e('select',{style:inputStyle,value:taskTypeId,onChange:ev=>setTaskTypeId(ev.target.value)},p.taskDefs.map(t=>e('option',{key:t.id,value:t.id},t.label)))) : null,
-
-      e('div',{style:fieldWrap},
-        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
-          e('label',{style:labelStyle},'Client'),
+      // Client
+      e('div',{style:wrap},
+        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}},
+          e('label',{style:{...lbl,marginBottom:0}},'Client'),
           e('label',{style:{fontSize:10,color:'var(--color-text-tertiary)',display:'flex',alignItems:'center',gap:4,cursor:'pointer'}},
-            e('input',{type:'checkbox',checked:noClient,onChange:ev=>setNoClient(ev.target.checked),style:{margin:0}}),'Internal / non-client task')
+            e('input',{type:'checkbox',checked:noClient,onChange:ev=>{setNoClient(ev.target.checked);},style:{margin:0}}),'Internal task (no client)')
         ),
-        !noClient ? e(CreatableSelect,{
-          value:clientId,
-          options:p.clients.map(c=>({id:c.id,label:c.name})),
-          newLabel:'client',
-          placeholder:'e.g. Patel & Co',
-          adding:addingClient,setAdding:setAddingClient,draft:clientDraft,setDraft:setClientDraft,
-          onChange:setClientId,
-          onCreate:name=>{const c=p.onAddClient(name,'monthly'); if(c) setClientId(c.id);}
-        }) : null
-      ),
-
-      e('div',{style:fieldWrap},
-        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
-          e('label',{style:labelStyle},'Period'),
-          e('label',{style:{fontSize:10,color:'var(--color-text-tertiary)',display:'flex',alignItems:'center',gap:4,cursor:'pointer'}},
-            e('input',{type:'checkbox',checked:noPeriod,onChange:ev=>setNoPeriod(ev.target.checked),style:{margin:0}}),'No period (one-off task)')
-        ),
-        !noPeriod ? e('div',{style:{display:'flex',gap:8}},
-          e('div',{style:{flex:1}},
-            e('input',{type:'number',style:{...inputStyle},placeholder:'Year e.g. 2025',value:periodYear,min:2000,max:2099,
-              onChange:ev=>{ setPeriodYear(ev.target.value); buildPeriod(ev.target.value,periodQ,periodM); }})
-          ),
-          e('div',{style:{flex:1}},
-            e('select',{style:inputStyle,value:periodQ,onChange:ev=>{ setPeriodQ(ev.target.value); buildPeriod(periodYear,ev.target.value,periodM); }},
-              [e('option',{key:'',value:''},'Quarter (opt.)'),
-               ...QUARTERS.map(q=>e('option',{key:q,value:q},q))]
-            )
-          ),
-          e('div',{style:{flex:1}},
-            e('select',{style:inputStyle,value:periodM,onChange:ev=>{ setPeriodM(ev.target.value); buildPeriod(periodYear,periodQ,ev.target.value); }},
-              [e('option',{key:'',value:''},'Month (opt.)'),
-               ...MONTHS_LIST.map(m=>e('option',{key:m,value:m},m))]
-            )
-          )
+        !noClient ? (
+          addingClient
+            ? e('div',{style:{display:'flex',gap:6}},
+                e('input',{style:inp,autoFocus:true,placeholder:'Client name…',value:clientDraft,
+                  onChange:ev=>setClientDraft(ev.target.value),
+                  onKeyDown:ev=>{if(ev.key==='Enter'&&clientDraft.trim()){const c=p.onAddClient(clientDraft.trim(),'monthly');if(c){setClientId(c.id);setAddingClient(false);setClientDraft('');}}
+                    if(ev.key==='Escape'){setAddingClient(false);setClientDraft('');}}
+                }),
+                e(Btn,{onClick:()=>{if(clientDraft.trim()){const c=p.onAddClient(clientDraft.trim(),'monthly');if(c){setClientId(c.id);setAddingClient(false);setClientDraft('');}}}}, 'Add'),
+                e(Btn,{onClick:()=>{setAddingClient(false);setClientDraft('');}}, '✕')
+              )
+            : e('select',{style:inp,value:clientId,onChange:ev=>{ if(ev.target.value==='__new__'){setAddingClient(true);}else{setClientId(ev.target.value);}}},
+                e('option',{key:'',value:'',disabled:true},'— select client —'),
+                ...p.clients.map(c=>e('option',{key:c.id,value:c.id},c.name)),
+                e('option',{key:'__new__',value:'__new__'},'+ Add new client…')
+              )
         ) : null
       ),
 
-      e('div',{style:{marginBottom:12}},e('label',{style:labelStyle},'Due date ',e('span',{style:{color:'#993C1D'}},'*')),
-        e('input',{style:inputStyle,placeholder:'e.g. 20 Jul',value:due,onChange:ev=>setDue(ev.target.value)})),
-
-      e('div',{style:{display:'flex',gap:10,marginBottom:12}},
-        e('div',{style:{flex:1}},e('label',{style:labelStyle},'Preparer'),
-          e('select',{style:inputStyle,value:prep,onChange:ev=>setPrep(ev.target.value)},modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))),
-        e('div',{style:{flex:1}},e('label',{style:labelStyle},'Reviewer'),
-          e('select',{style:inputStyle,value:rev,onChange:ev=>setRev(ev.target.value)},modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name))))
+      // Period — FY + Q + Month
+      e('div',{style:wrap},
+        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}},
+          e('label',{style:{...lbl,marginBottom:0}},'Period'),
+          e('label',{style:{fontSize:10,color:'var(--color-text-tertiary)',display:'flex',alignItems:'center',gap:4,cursor:'pointer'}},
+            e('input',{type:'checkbox',checked:noPeriod,onChange:ev=>setNoPeriod(ev.target.checked),style:{margin:0}}),'No period (one-off)')
+        ),
+        !noPeriod ? e('div',{style:{display:'flex',gap:8}},
+          e('select',{style:{...inp,flex:2},value:fy,onChange:ev=>setFy(ev.target.value)},
+            e('option',{key:'',value:''},'FY…'),
+            ...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f))
+          ),
+          e('select',{style:{...inp,flex:1},value:periodQ,onChange:ev=>{setPeriodQ(ev.target.value);if(ev.target.value)setPeriodM('');}},
+            e('option',{key:'',value:''},'Quarter'),
+            ...QUARTERS.map(q=>e('option',{key:q,value:q},q))
+          ),
+          e('select',{style:{...inp,flex:1},value:periodM,onChange:ev=>{setPeriodM(ev.target.value);if(ev.target.value)setPeriodQ('');}},
+            e('option',{key:'',value:''},'Month'),
+            ...MONTHS_LIST.map(m=>e('option',{key:m,value:m},m))
+          )
+        ) : null,
+        !noPeriod && buildPeriod() ? e('div',{style:{fontSize:9,color:'#0F6E56',marginTop:4}},'Period: '+buildPeriod()) : null
       ),
 
-      !noClient ? e('div',{style:{marginBottom:18}},
-        e('label',{style:labelStyle},'Recurrence for this client + task'),
-        e('select',{style:inputStyle,value:freq,onChange:ev=>setFreq(ev.target.value)},FREQUENCIES.map(f=>e('option',{key:f.id,value:f.id},f.label))),
-        e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginTop:4}},'Specific to this client + task type. New occurrences are created manually with "+ Next occurrence", or in bulk via the task\'s "Create for all clients" button.')
-      ) : null,
+      // Due date — native date picker
+      e('div',{style:wrap},
+        e('label',{style:lbl},'Due date ', e('span',{style:{color:'#993C1D'}},'*')),
+        e('input',{type:'date',style:inp,value:due,onChange:ev=>setDue(ev.target.value)})
+      ),
 
-      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
+      // Recurring
+      e('div',{style:{...wrap,padding:'10px 12px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},
+        e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'var(--color-text-secondary)',fontWeight:500}},
+          e('input',{type:'checkbox',checked:isRecurring,onChange:ev=>setIsRecurring(ev.target.checked),style:{margin:0}}),
+          'This is a recurring task'
+        ),
+        isRecurring ? e('div',{style:{marginTop:8}},
+          e('select',{style:{...inp,width:'auto'},value:freq,onChange:ev=>setFreq(ev.target.value)},
+            [{id:'monthly',label:'Monthly'},{id:'quarterly',label:'Quarterly'},{id:'yearly',label:'Yearly'}].map(f=>e('option',{key:f.id,value:f.id},f.label))
+          ),
+          e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginTop:4}},'Next occurrence can be triggered from the task row after this one is done.')
+        ) : null
+      ),
+
+      // Preparer / Reviewer
+      e('div',{style:{display:'flex',gap:10,marginBottom:20}},
+        e('div',{style:{flex:1}},
+          e('label',{style:lbl},'Preparer'),
+          e('select',{style:inp,value:prep,onChange:ev=>setPrep(ev.target.value)},
+            modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
+        ),
+        e('div',{style:{flex:1}},
+          e('label',{style:lbl},'Reviewer'),
+          e('select',{style:inp,value:rev,onChange:ev=>setRev(ev.target.value)},
+            modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
+        )
+      ),
+
+      // Actions
+      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8,paddingTop:12,borderTop:'0.5px solid var(--color-border-tertiary)'}},
         e(Btn,{onClick:p.onClose},'Cancel'),
-        e(Btn,{pri:true,onClick:handleSubmit},mode==='newtype'?'Create task type':'Add task')
+        e(Btn,{pri:true,onClick:handleSubmit},
+          isNewType && newTaskLabel ? 'Create task type & add task' : 'Add task')
       )
     )
   );
