@@ -84,11 +84,13 @@ const CONFIG = {
   privateUserLogin: 'deepak_drak_co_in',
 
   // Reviewer accounts — these users get full MS login + private file access
-  // Add the actual email addresses of your reviewer accounts here
   reviewerEmails: [
     'deepak@drak.co.in',
     'amruta@drak.co.in',
   ],
+  // Reviewer People IDs — must match ID column in People sheet exactly
+  // These names are hidden from the preparer picker
+  reviewerIds: ['DR','AK'],
 
   orgName: 'DRAK Associates',
 };
@@ -583,14 +585,13 @@ function App(){
 
   // ── Preparer picker ───────────────────────────────────────
   if(phase==='preparer-pick'){
-    // Only show people with no email — reviewers have emails in shared sheet and use MS login
-    // Even if someone picks a reviewer name, role is hardcoded to 'preparer' in pickPreparer
-    const preparers = (appData?.people||[]).filter(p=>!p.email);
+    // Filter using CONFIG.reviewerIds — hardcoded in HTML, cannot be spoofed via Excel
+    const preparers = (appData?.people||[]).filter(p=>!CONFIG.reviewerIds.includes(p.id));
     return e('div',{className:'login-screen'},
       e('div',{className:'login-card'},
         e('div',{className:'login-logo'},'WorkTrack'),
         e('div',{className:'login-sub'},'Who are you?'),
-        e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:12,textAlign:'center'}},'Reviewers — please sign out and log in with your own Microsoft account.'),
+        e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:12,textAlign:'center'}},'Reviewers — please use your own Microsoft account to sign in.'),
         e('div',{className:'picker-list'},
           preparers.map((p,i)=>e('div',{key:p.id,className:'picker-item',onClick:()=>pickPreparer(p)},
             e('div',{className:'picker-avatar',style:{background:AVC[i%5]}},p.name.slice(0,2).toUpperCase()),
