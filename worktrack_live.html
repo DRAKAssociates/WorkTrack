@@ -2022,6 +2022,7 @@ function WorkTrackApp(p){
     BUCKETS.forEach(b=>init[b.id]={...BLANK_FILTER});
     return init;
   });
+  const [globalDueFilter, setGlobalDueFilter] = useState('all'); // urgency bucket id or 'all'
   const [taskOverrides,setTaskOverrides]=useState({});
   const [expTask,setExpTask]=useState(null);
   const [expCl,setExpCl]=useState(null);
@@ -2059,14 +2060,20 @@ function WorkTrackApp(p){
     const hasPerFilter=(f.fy||'all')!=='all'||(f.quarter||'all')!=='all'||(f.month||'all')!=='all';
     if(hasPerFilter) r=r.filter(x=>periodMatchesFilter(x.period, f));
     if((f.status||'all')!=='all') r=r.filter(x=>x.status===f.status);
+    // Per-bucket urgency filter
     if((f.urgency||'all')!=='all') r=r.filter(x=>urgencyBucket(effectiveDue(x.due, x.nextHearing))===f.urgency);
+    // Global due date filter — applied on top, overrides nothing but adds a cross-bucket constraint
+    if((globalDueFilter||'all')!=='all') r=r.filter(x=>urgencyBucket(effectiveDue(x.due, x.nextHearing))===globalDueFilter);
     return r;
   };
   const tStats = td => { const rows=filtForTask(ct.filter(x=>x.tid===td.id),td); return {total:rows.length,done:rows.filter(x=>x.status==='done').length,pending:rows.filter(x=>x.status==='pending').length,review:rows.filter(x=>x.status==='review').length,approved:rows.filter(x=>x.status==='approved').length}; };
   const bStats = bid => {
     const tds=taskDefs.filter(t=>t.bucket===bid);
     let total=0,done=0,pending=0;
-    tds.forEach(td=>{const s=tStats(td);total+=s.total;done+=s.done;pending+=s.pending+s.review+s.approved;});
+    tds.forEach(td=>{
+      const s=tStats(td); // tStats already applies filtForTask which includes globalDueFilter
+      total+=s.total;done+=s.done;pending+=s.pending+s.review+s.approved;
+    });
     return {total,done,pending};
   };
 
@@ -2953,6 +2960,25 @@ function WorkTrackApp(p){
         e('div',{style:{display:'flex',alignItems:'center',gap:4,fontSize:12,marginBottom:8}},
           bucket?e(React.Fragment,{key:'b'},BcPart('Dashboard',()=>setBucket(null)),BcPart(bi.label)):BcPart('Dashboard')
         ),
+        // Global due date filter — always visible on dashboard
+        !bucket ? e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:10,padding:'8px 12px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},
+          e('span',{style:{fontSize:10,fontWeight:500,color:'var(--color-text-secondary)',whiteSpace:'nowrap'}},'Due date filter:'),
+          e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
+            [{id:'all',label:'All'},...URGENCY_BUCKETS].map(u=>
+              e('span',{key:u.id,
+                onClick:()=>setGlobalDueFilter(u.id),
+                style:{
+                  fontSize:9,padding:'2px 8px',borderRadius:20,cursor:'pointer',whiteSpace:'nowrap',
+                  border: globalDueFilter===u.id ? '0.5px solid '+(u.color||'#534AB7') : '0.5px solid var(--color-border-tertiary)',
+                  background: globalDueFilter===u.id ? (u.id==='all'?'#EEEDFE':'#FAF9FF') : 'transparent',
+                  color: globalDueFilter===u.id ? (u.color||'#534AB7') : 'var(--color-text-tertiary)',
+                  fontWeight: globalDueFilter===u.id ? 600 : 400
+                }
+              }, u.label)
+            )
+          ),
+          globalDueFilter!=='all' ? e('span',{onClick:()=>setGlobalDueFilter('all'),style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',marginLeft:4}},'✕ Clear') : null
+        ) : null,
         bucket?e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap',gap:8}},
           e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Default filter for all '+bi.label.toLowerCase()+' tasks (tasks can override below):'),
           e(MiniFilterBar,{filter:bucketFilters[bucket],onChange:patch=>setBucketFilter(bucket,patch)})
