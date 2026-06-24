@@ -54,6 +54,7 @@
   .save-indicator{position:fixed;bottom:16px;right:16px;background:#534AB7;color:#fff;font-size:11px;padding:6px 12px;border-radius:20px;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:2000}
   .save-indicator.visible{opacity:1}
   .save-indicator.error{background:#993C1D}
+  .save-indicator.synced{background:#0F6E56}
 
   /* App wrapper */
   .app-wrap{padding:16px;min-height:100vh}
@@ -395,6 +396,8 @@ function App(){
   const [saveState, setSaveState] = useState('idle'); // idle|saving|saved|error
   const saveTimer = useRef(null);
   const pendingSave = useRef(false);
+  const pollTimer = useRef(null);
+  const lastSyncedAt = useRef(null); // ISO timestamp of last known save we loaded
 
   useEffect(()=>{
     msalInstance.initialize().then(()=>{
@@ -413,6 +416,13 @@ function App(){
       }).catch(()=>setPhase('login'));
     });
   },[]);
+
+  // Tab visibility — sync when user returns to tab
+  useEffect(()=>{
+    const onVisible=()=>{ if(document.visibilityState==='visible' && phase==='app') syncMasters(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return ()=>document.removeEventListener('visibilitychange', onVisible);
+  },[phase, sharedFileRef]);
 
   const handleMsalLogin = async (account, token) => {
     setPhase('loading');
@@ -469,6 +479,8 @@ function App(){
 
       const data = cleanAppData(rowsToApp(sWb, pWb||{Sheets:{},SheetNames:[]}, isReviewer));
       setAppData(data);
+      // Record the LastSaved timestamp we loaded so polling can detect changes
+      lastSyncedAt.current = data.settings?.LastSaved || null;
 
       // Resolve person ID from People sheet by exact email match
       if(email && data.people && data.people.length>0){
@@ -532,6 +544,19 @@ function App(){
           ['ID','Name','Email','Role','AccountType']);
       }
 
+      // Write Settings including LastSaved timestamp so other clients detect the change
+      const now = new Date().toISOString();
+      const settingsData = [
+        {Key:'RefLabel1', Value:data.refLabels?.ref1||'Reference 1'},
+        {Key:'RefLabel2', Value:data.refLabels?.ref2||'Reference 2'},
+        {Key:'RefLabel3', Value:data.refLabels?.ref3||'Reference 3'},
+        {Key:'AppName',   Value:'WorkTrack'},
+        {Key:'OrgName',   Value:CONFIG.orgName||''},
+        {Key:'LastSaved', Value:now},
+        {Key:'LastSavedBy', Value:currentUser?.name||''},
+      ];
+      sheetToWorkbook(sWb,'Settings', settingsData, ['Key','Value']);
+
       await uploadExcel(sWb, sharedFileRef?.driveId, sharedFileRef?.itemId, null);
 
       // Write private workbook if reviewer
@@ -542,9 +567,11 @@ function App(){
         await uploadExcel(pWb, privateFileRef.driveId, privateFileRef.itemId, null);
       }
       setSaveState('saved');
+      setTimeout(()=>setSaveState('idle'), 2000);
     } catch(err){
       console.error('Save failed', err);
       setSaveState('error');
+      setTimeout(()=>setSaveState('idle'), 4000);
     }
   };
 
@@ -558,6 +585,57 @@ function App(){
   const immediateSave = async (newCt, newAppData) => {
     if(saveTimer.current) clearTimeout(saveTimer.current); // cancel pending debounced save
     await doSave(newCt, newAppData);
+  };
+
+  // Silent sync — called by poll. Reads Settings sheet only to check LastSaved.
+  // If newer, reloads full shared file and merges masters (clients, taskDefs, groups, people).
+  // Does NOT overwrite local ct (assignments) — those are merged by ID.
+  const syncMasters = async () => {
+    if(!sharedFileRef) return;
+    try{
+      // Lightweight: read just the Settings sheet to check LastSaved
+      const sWb = await downloadExcel(sharedFileRef.driveId, sharedFileRef.itemId, null);
+      const settings = {};
+      parseSheet(sWb,'Settings').forEach(r=>{ settings[r.Key]=r.Value; });
+      const remoteTs = settings.LastSaved || null;
+      if(!remoteTs || remoteTs === lastSyncedAt.current) return; // no change
+
+      // Change detected — load full data and merge masters
+      const isReviewer = currentUser?.isReviewer || false;
+      const pWb = isReviewer && privateFileRef
+        ? await downloadExcel(privateFileRef.driveId, privateFileRef.itemId, null).catch(()=>null)
+        : null;
+      const freshData = cleanAppData(rowsToApp(sWb, pWb||{Sheets:{},SheetNames:[]}, isReviewer));
+
+      setAppData(prev=>{
+        // Merge: update masters, merge assignments by ID (add new, update existing, keep local unsaved)
+        const prevCtIds = new Set(prev.ct.map(r=>r.id));
+        const freshCtIds = new Set(freshData.ct.map(r=>r.id));
+        // Keep all local rows; add any new rows from remote not in local
+        const merged = [
+          ...prev.ct.map(r=>{ // update existing rows with fresh data
+            const fresh = freshData.ct.find(x=>x.id===r.id);
+            return fresh ? {...fresh, hearingLog:r.hearingLog||fresh.hearingLog} : r;
+          }),
+          ...freshData.ct.filter(r=>!prevCtIds.has(r.id)) // add new rows from remote
+        ];
+        return {
+          ...prev,
+          clients:  freshData.clients,
+          taskDefs: freshData.taskDefs,
+          groups:   freshData.groups,
+          people:   freshData.people,
+          ct:       merged,
+          settings: freshData.settings,
+        };
+      });
+      setSharedWb(sWb);
+      lastSyncedAt.current = remoteTs;
+      setSaveState('synced');
+      setTimeout(()=>setSaveState('idle'), 2000);
+    } catch(e){
+      console.warn('Sync check failed silently:', e.message);
+    }
   };
 
   const updateData = (patch) => {
@@ -627,16 +705,17 @@ function App(){
         initialData:appData,
         currentUser,
         onDataChange:(patch)=>{
-          // Update local appData and trigger save to SharePoint
           setAppData(prev=>({...prev,...patch}));
           triggerSave(patch.ct, {...appData,...patch});
         },
         onSignOut:()=>{
-          msalInstance.logoutPopup();
+          if(pollTimer.current) clearInterval(pollTimer.current);
+          msalInstance.logoutPopup().catch(()=>{});
           setPhase('login');
           setCurrentUser(null);
           setAppData(null);
-        }
+        },
+        onSyncCheck: syncMasters
       })
     );
   }
@@ -645,8 +724,8 @@ function App(){
 }
 
 function SaveIndicator(p){
-  const msgs = {saving:'Saving to SharePoint…',saved:'✓ Saved',error:'⚠ Save failed — check connection',idle:''};
-  return e('div',{className:'save-indicator'+(p.state!=='idle'?' visible':'')+(p.state==='error'?' error':'')},msgs[p.state]||'');
+  const msgs = {saving:'Saving…',saved:'✓ Saved',error:'⚠ Save failed — check connection',synced:'↻ Updated by another user',idle:''};
+  return e('div',{className:'save-indicator'+(p.state!=='idle'?' visible':'')+(p.state==='error'?' error':'')+(p.state==='synced'?' synced':'')},msgs[p.state]||'');
 }
 
 
@@ -1925,6 +2004,8 @@ function WorkTrackApp(p){
   // p.initialData = {groups, taskDefs, clients, ct, people, refLabels, settings}
   // p.currentUser = {id, name, isReviewer, email}
   // p.onDataChange = fn(patch) — called whenever data changes, triggers auto-save
+  // p.onSyncCheck = fn() — silently checks if another user saved, merges if so
+  const syncCheck = p.onSyncCheck || (()=>Promise.resolve());
   const CURRENT_USER = p.currentUser ? (p.currentUser.id || p.currentUser.email.split('@')[0].toUpperCase()) : 'RK';
   // Override TEAM with real people from SharePoint People sheet
   const TEAM = (p.initialData && p.initialData.people && p.initialData.people.length)
@@ -2131,7 +2212,7 @@ function WorkTrackApp(p){
   };
   const toggleTaskCompliance=(tid)=>setTaskDefs(prev=>prev.map(t=>t.id===tid?{...t,isCompliance:!t.isCompliance}:t));
 
-  const goView=v=>{setView(v);setBucket(null);setExpTask(null);setExpCl(null);setExpCC(null);setExpNT(null);setFocusClient(null);};
+  const goView=v=>{ syncCheck(); setView(v);setBucket(null);setExpTask(null);setExpCl(null);setExpCC(null);setExpNT(null);setFocusClient(null); };
   const goClient=cid=>{setFocusClient(cid);setView('clients');setExpCC(cid);setExpNT(null);};
 
   const handleCreateTaskType=newType=>setTaskDefs(wrapTaskDefs(prev=>[...prev,newType]));
@@ -2997,7 +3078,7 @@ function WorkTrackApp(p){
         e(Btn,{onClick:()=>setShowExcelModal(true)},e('i',{className:'ti ti-file-spreadsheet','aria-hidden':'true'}),'Import Excel'),
         e(Btn,{onClick:handleExportVisible},e('i',{className:'ti ti-download','aria-hidden':'true'}),'Export visible'),
         e(Btn,{onClick:handleExportAll},e('i',{className:'ti ti-download','aria-hidden':'true'}),'Export all'),
-        e(Btn,{pri:true,onClick:()=>setShowAddModal(true)},e('i',{className:'ti ti-plus','aria-hidden':'true'}),'Add task')
+        e(Btn,{pri:true,onClick:()=>{ syncCheck(); setShowAddModal(true); }},e('i',{className:'ti ti-plus','aria-hidden':'true'}),'Add task')
       ),
       e('div',{style:{flex:1,overflowY:'auto',padding:'12px 14px'}},renderContent())
     )
