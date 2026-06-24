@@ -259,7 +259,21 @@ function rowsToApp(sharedWb, privateWb, isReviewer){
       }
     });
   }
-  const people = parseSheet(sharedWb,'People').map(r=>({id:r.ID,name:r.Name,role:r.Role,accountType:r.AccountType}));
+  // Shared People sheet — ID + Name only (preparers can see this, nothing sensitive)
+  const sharedPeople = parseSheet(sharedWb,'People').map(r=>({
+    id:r.ID, name:r.Name,
+    email:'', role:'preparer', accountType:'shared' // safe defaults, overridden by private
+  }));
+  // Private People sheet — full details: email, role, accountType (reviewers only)
+  const privatePeople = parseSheet(privateWb,'People').map(r=>({
+    id:r.ID, name:r.Name, email:(r.Email||'').toLowerCase().trim(),
+    role:r.Role||'preparer', accountType:r.AccountType||'shared'
+  }));
+  // Merge: start with shared names, private overrides everything
+  const peopleMap = {};
+  sharedPeople.forEach(p=>{ peopleMap[p.id]=p; });
+  privatePeople.forEach(p=>{ peopleMap[p.id]={...peopleMap[p.id],...p}; }); // private wins
+  const people = Object.values(peopleMap);
   const settings = {};
   parseSheet(sharedWb,'Settings').forEach(r=>{settings[r.Key]=r.Value;});
 
@@ -390,16 +404,16 @@ function App(){
       const isReviewer = CONFIG.reviewerEmails.some(r=>r.toLowerCase()===email.toLowerCase());
       const displayName = account.name||email;
 
-      // Find this person in People sheet or create entry
+      // Temporarily set currentUser — id will be resolved after People sheet loads
       setCurrentUser({
-        id: isReviewer ? email.split('@')[0].toUpperCase() : null,
+        id: null, // resolved after loadData
         name: displayName,
         email,
         isReviewer,
         role: isReviewer ? 'reviewer' : 'preparer'
       });
 
-      await loadData(isReviewer);
+      await loadData(isReviewer, email);
     } catch(err){
       console.error(err);
       setPhase('error');
@@ -414,7 +428,7 @@ function App(){
     } catch(e){ console.error(e); }
   };
 
-  const loadData = async (isReviewer) => {
+  const loadData = async (isReviewer, email) => {
     setPhase('loading');
     try{
       // Load shared file
@@ -438,6 +452,19 @@ function App(){
 
       const data = cleanAppData(rowsToApp(sWb, pWb||{Sheets:{},SheetNames:[]}, isReviewer));
       setAppData(data);
+
+      // Resolve person ID from People sheet by exact email match
+      if(email && data.people && data.people.length>0){
+        const match = data.people.find(p=>p.email && p.email===email.toLowerCase().trim());
+        if(match){
+          setCurrentUser(prev=>({...prev, id:match.id, name:match.name}));
+        } else {
+          // Fallback: first reviewer in People sheet (shouldn't happen if emails are set up correctly)
+          const firstReviewer = data.people.find(p=>p.role==='reviewer');
+          if(firstReviewer) setCurrentUser(prev=>({...prev, id:firstReviewer.id, name:firstReviewer.name}));
+          console.warn('No People sheet entry found for email:', email, '— please add email to People sheet');
+        }
+      }
 
       // If reviewer, go straight to app. If preparer account, show picker.
       if(isReviewer){
@@ -474,7 +501,16 @@ function App(){
         sheetToWorkbook(sWb,'Clients',data.clients.map(c=>({ID:c.id,Name:c.name,DefaultFreq:c.defaultFreq})),['ID','Name','DefaultFreq']);
         sheetToWorkbook(sWb,'TaskTypes',data.taskDefs.map(t=>({ID:t.id,Label:t.label,Group:t.group||'',Bucket:t.bucket,IsCompliance:t.isCompliance?'true':'false'})),['ID','Label','Group','Bucket','IsCompliance']);
         sheetToWorkbook(sWb,'Groups',data.groups.map(g=>({ID:g.id,Label:g.label})),['ID','Label']);
-        sheetToWorkbook(sWb,'People',data.people.map(p=>({ID:p.id,Name:p.name,Role:p.role,AccountType:p.accountType})),['ID','Name','Role','AccountType']);
+        // Shared People — ID + Name only, nothing sensitive
+        sheetToWorkbook(sWb,'People',
+          data.people.map(p=>({ID:p.id, Name:p.name})),
+          ['ID','Name']);
+        // Private People — full details (email, role, accountType) — always written by reviewer
+        if(currentUser?.isReviewer && privateWb){
+          sheetToWorkbook(privateWb,'People',
+            data.people.map(p=>({ID:p.id, Name:p.name, Email:p.email||'', Role:p.role||'preparer', AccountType:p.accountType||'shared'})),
+            ['ID','Name','Email','Role','AccountType']);
+        }
 
         await uploadExcel(sWb, sharedFileRef?.driveId, sharedFileRef?.itemId, null);
 
@@ -735,20 +771,18 @@ function parsePeriod(period){
   return {};
 }
 function periodMatchesFilter(period, f){
-  if(!period) return !f.year && (f.quarter||'all')==='all' && (f.month||'all')==='all';
+  if(!period) return (f.fy||'all')==='all' && (f.quarter||'all')==='all' && (f.month||'all')==='all';
   const p=parsePeriod(period);
-  // year filter: match against the calendar year in the period string
-  if(f.year){
-    const yearStr=String(f.year);
-    // For monthly: "Jun 2025" → year 2025. For quarterly: "Q1 FY26" → FY ends 26 → years 2025-26
-    const periodYear = period.match(/\d{4}/)?.[0];
-    if(periodYear && periodYear!==yearStr) return false;
+  // FY filter: match against Indian FY e.g. "FY25-26"
+  if((f.fy||'all')!=='all'){
+    const pFY = p.fy || periodToFY(period);
+    if(pFY !== f.fy) return false;
   }
   if((f.quarter||'all')!=='all' && p.quarter!==f.quarter) return false;
   if((f.month||'all')!=='all' && p.month!==f.month) return false;
   return true;
 }
-const BLANK_FILTER={year:null,quarter:'all',month:'all',status:'all'};
+const BLANK_FILTER={fy:'all',quarter:'all',month:'all',status:'all'};
 const MONTHS_LIST=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const QUARTERS=['Q1','Q2','Q3','Q4'];
 
@@ -899,15 +933,14 @@ function periodOptions(includeAll){
 }
 
 function MiniFilterBar(p){
-  // p.filter = {year, quarter, month, status}; p.onChange(newFilter)
+  // p.filter = {fy, quarter, month, status}; p.onChange(newFilter)
   const f=p.filter||BLANK_FILTER;
   const upd=patch=>p.onChange({...f,...patch});
   const selStyle={fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'};
   return e('div',{style:{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
-    e('input',{type:'number',placeholder:'Year',value:f.year||'',min:2000,max:2099,
-      onClick:ev=>ev.stopPropagation(),
-      onChange:ev=>{ev.stopPropagation();upd({year:ev.target.value?parseInt(ev.target.value):null});},
-      style:{...selStyle,width:60,cursor:'text'}}),
+    e('select',{value:f.fy||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({fy:ev.target.value});},style:{...selStyle,maxWidth:90}},
+      [e('option',{key:'all',value:'all'},'All FY'),...FY_OPTIONS.map(fy=>e('option',{key:fy,value:fy},fy))]
+    ),
     e('select',{value:f.quarter||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({quarter:ev.target.value});},style:selStyle},
       [e('option',{key:'all',value:'all'},'All Q'),...QUARTERS.map(q=>e('option',{key:q,value:q},q))]
     ),
@@ -1331,6 +1364,9 @@ function AddTaskModal(p){
   // ── Error ──
   const [formError, setFormError] = useState('');
 
+  // ── Private (reviewer only) ──
+  const [isPrivate, setIsPrivate] = useState(false);
+
   const lbl  = {fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
   const inp  = {fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
   const wrap = {marginBottom:14};
@@ -1377,6 +1413,7 @@ function AddTaskModal(p){
       prep, rev, pi:pIdx>=0?pIdx:0, ri:rIdx>=0?rIdx:0,
       status:'pending', od:false,
       freq: isRecurring ? freq : 'none',
+      isPrivate: isPrivate && !!p.isReviewer,
       st:[]
     });
     p.onClose();
@@ -1563,6 +1600,15 @@ function AddTaskModal(p){
         )
       ),
 
+      // Private task toggle — reviewers only
+      p.isReviewer ? e('div',{style:{marginBottom:14,padding:'8px 12px',background:'#F7F6FE',border:'0.5px solid #AFA9EC',borderRadius:'var(--border-radius-md)'}},
+        e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#534AB7',fontWeight:500}},
+          e('input',{type:'checkbox',checked:isPrivate,onChange:ev=>setIsPrivate(ev.target.checked),style:{margin:0}}),
+          '🔒 Private task (only visible to reviewers)'
+        ),
+        isPrivate ? e('div',{style:{fontSize:9,color:'#534AB7',marginTop:4,paddingLeft:18}},'Saved to private file. Preparers will not see this task.') : null
+      ) : null,
+
       // Actions
       e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8,paddingTop:12,borderTop:'0.5px solid var(--color-border-tertiary)'}},
         e(Btn,{onClick:p.onClose},'Cancel'),
@@ -1624,7 +1670,7 @@ function WorkTrackApp(p){
   const filtForTask = (rows, td) => {
     const f=getTaskFilter(td);
     let r=rows;
-    const hasPerFilter=!!f.year||(f.quarter||'all')!=='all'||(f.month||'all')!=='all';
+    const hasPerFilter=(f.fy||'all')!=='all'||(f.quarter||'all')!=='all'||(f.month||'all')!=='all';
     if(hasPerFilter) r=r.filter(x=>periodMatchesFilter(x.period, f));
     if((f.status||'all')!=='all') r=r.filter(x=>x.status===f.status);
     return r;
@@ -2481,6 +2527,7 @@ function WorkTrackApp(p){
   return e(React.Fragment,null,
   showAddModal ? e(AddTaskModal,{
     taskDefs,clients,groups,ct,team:TEAM,
+    isReviewer: p.currentUser?.isReviewer,
     onClose:()=>setShowAddModal(false),
     onCreateTaskType:handleCreateTaskType,
     onAddAssignment:handleAddAssignment,
