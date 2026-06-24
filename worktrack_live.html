@@ -244,7 +244,21 @@ function sheetToWorkbook(wb, sheetName, rows, columns){
 function rowsToApp(sharedWb, privateWb, isReviewer){
   const clients = parseSheet(sharedWb,'Clients').map(r=>({id:r.ID,name:r.Name,defaultFreq:r.DefaultFreq||'none'}));
   const taskDefs = parseSheet(sharedWb,'TaskTypes').map(r=>({id:r.ID,label:r.Label,group:r.Group,bucket:r.Bucket,isCompliance:r.IsCompliance==='true'||r.IsCompliance===true||r.IsCompliance==='TRUE'}));
-  const groups = [...new Set(taskDefs.map(t=>t.group))].map(g=>({id:g,label:g}));
+  // Read Groups from dedicated sheet — fall back to deriving from TaskTypes only if sheet missing
+  let groups = [];
+  const groupRows = parseSheet(sharedWb,'Groups');
+  if(groupRows.length>0){
+    groups = groupRows.map(r=>({id:r.ID, label:r.Label})).filter(g=>g.id&&g.label);
+  } else {
+    // Legacy fallback: derive from TaskType group field — only works if IDs happen to be readable names
+    const seen = new Set();
+    taskDefs.forEach(t=>{
+      if(t.group && !seen.has(t.group)){
+        seen.add(t.group);
+        groups.push({id:t.group, label:t.group}); // best effort — will show ID as label
+      }
+    });
+  }
   const people = parseSheet(sharedWb,'People').map(r=>({id:r.ID,name:r.Name,role:r.Role,accountType:r.AccountType}));
   const settings = {};
   parseSheet(sharedWb,'Settings').forEach(r=>{settings[r.Key]=r.Value;});
@@ -284,6 +298,25 @@ function rowsToApp(sharedWb, privateWb, isReviewer){
   });
 
   return {clients, taskDefs, groups, people, settings, refLabels, ct: allAssignments};
+}
+
+function cleanAppData(data){
+  // Remove assignments that reference non-existent task types
+  const taskIds = new Set(data.taskDefs.map(t=>t.id));
+  const cleanCt = data.ct.filter(r=>taskIds.has(r.tid));
+  if(cleanCt.length !== data.ct.length){
+    console.warn('Removed '+(data.ct.length-cleanCt.length)+' orphaned assignment(s) referencing missing task types');
+  }
+  // Fix groups that have ID as label (legacy corrupt data) — try to find a real name
+  // If group label looks like an ID (no spaces, contains _), mark it as needing rename
+  const cleanGroups = data.groups.map(g=>{
+    if(g.label === g.id || /^[a-z]+_[a-z0-9]+$/.test(g.label)){
+      // Try to infer from task types that use this group — can't get name, so flag it
+      return {...g, label:'(unnamed category — please rename)', needsRename:true};
+    }
+    return g;
+  });
+  return {...data, ct:cleanCt, groups:cleanGroups};
 }
 
 function appToRows(ct, taskDefs, isReviewer){
@@ -403,7 +436,7 @@ function App(){
         } catch(e){ console.warn('Private file not found, skipping',e); }
       }
 
-      const data = rowsToApp(sWb, pWb||{Sheets:{},SheetNames:[]}, isReviewer);
+      const data = cleanAppData(rowsToApp(sWb, pWb||{Sheets:{},SheetNames:[]}, isReviewer));
       setAppData(data);
 
       // If reviewer, go straight to app. If preparer account, show picker.
@@ -437,9 +470,10 @@ function App(){
         sheetToWorkbook(sWb,'Assignments',sharedAssignRows,ASSIGN_COLS);
         sheetToWorkbook(sWb,'SubTasks',sharedSubRows,SUB_COLS);
 
-        // Write clients, taskTypes, people back too
+        // Write clients, taskTypes, groups, people back too
         sheetToWorkbook(sWb,'Clients',data.clients.map(c=>({ID:c.id,Name:c.name,DefaultFreq:c.defaultFreq})),['ID','Name','DefaultFreq']);
-        sheetToWorkbook(sWb,'TaskTypes',data.taskDefs.map(t=>({ID:t.id,Label:t.label,Group:t.group,Bucket:t.bucket,IsCompliance:t.isCompliance?'true':'false'})),['ID','Label','Group','Bucket','IsCompliance']);
+        sheetToWorkbook(sWb,'TaskTypes',data.taskDefs.map(t=>({ID:t.id,Label:t.label,Group:t.group||'',Bucket:t.bucket,IsCompliance:t.isCompliance?'true':'false'})),['ID','Label','Group','Bucket','IsCompliance']);
+        sheetToWorkbook(sWb,'Groups',data.groups.map(g=>({ID:g.id,Label:g.label})),['ID','Label']);
         sheetToWorkbook(sWb,'People',data.people.map(p=>({ID:p.id,Name:p.name,Role:p.role,AccountType:p.accountType})),['ID','Name','Role','AccountType']);
 
         await uploadExcel(sWb, sharedFileRef?.driveId, sharedFileRef?.itemId, null);
