@@ -1014,7 +1014,7 @@ function periodToFY(period){
 
 // ---------- Excel import/export ----------
 // Reference 1/2/3 columns are only meaningful for Assessment-bucket tasks; leave blank for other rows.
-const EXCEL_COLUMNS=['Client','Task Type *','Category','Bucket *','FY','Quarter','Month','Due Date *','Preparer','Reviewer','Status','Frequency','Filed Date','Ack Number','Ref FY','Reference 1','Reference 2','Reference 3','Next Hearing','Hearing Note','Closed Without Approval','Cancelled'];
+const EXCEL_COLUMNS=['Client','Task Type *','Category','Bucket *','Compliance Filing','FY','Quarter','Month','Due Date *','Preparer','Reviewer','Status','Frequency','Filed Date','Ack Number','Ref FY','Reference 1','Reference 2','Reference 3','Next Hearing','Hearing Note','Closed Without Approval','Cancelled'];
 
 // Format ISO date to dd/mm/yyyy for Excel display
 function fmtDate(iso){
@@ -1090,6 +1090,7 @@ function rowToExcelRecord(r, taskDefs, clients, groups, people){
     'Task Type *': td.label || r.tid,
     'Category': grp ? grp.label : (td.group||''),
     'Bucket *': td.bucket||'',
+    'Compliance Filing': td.isCompliance ? 'Yes' : 'No',
     'FY': pFY,
     'Quarter': pQ,
     'Month': pM,
@@ -1144,9 +1145,9 @@ function buildTemplateWorkbook(people, clients, groups){
   const sampleClients = clients&&clients.length ? clients.slice(0,3).map(c=>c.name) : ['Mehta Exports','Sunrise Pvt Ltd','Dr. Anil Shah'];
 
   const sample=[
-    {'Client':sampleClients[0]||'Mehta Exports','Task Type *':'GSTR-1 Filing','Category':'GST','Bucket *':'recurring','FY':'FY25-26','Quarter':'NA','Month':'Jul','Due Date *':'20/07/2025','Preparer':samplePrep,'Reviewer':sampleRev,'Status':'Pending','Frequency':'monthly','Filed Date':'','Ack Number':'','Ref FY':'','Reference 1':'','Reference 2':'','Reference 3':'','Next Hearing':'','Hearing Note':'','Closed Without Approval':'','Cancelled':''},
-    {'Client':sampleClients[1]||'Sunrise Pvt Ltd','Task Type *':'Advance Tax','Category':'Income Tax','Bucket *':'periodical','FY':'FY25-26','Quarter':'Q2','Month':'NA','Due Date *':'15/09/2025','Preparer':samplePrep,'Reviewer':sampleRev,'Status':'Pending','Frequency':'quarterly','Filed Date':'','Ack Number':'','Ref FY':'','Reference 1':'','Reference 2':'','Reference 3':'','Next Hearing':'','Hearing Note':'','Closed Without Approval':'','Cancelled':''},
-    {'Client':sampleClients[2]||'Dr. Anil Shah','Task Type *':'Assessment - Scrutiny','Category':'Assessment','Bucket *':'assessment','FY':'NA','Quarter':'NA','Month':'NA','Due Date *':'31/07/2025','Preparer':samplePrep,'Reviewer':sampleRev,'Status':'Pending','Frequency':'yearly','Filed Date':'','Ack Number':'','Ref FY':'FY24-25','Reference 1':'NTC/2025/00112','Reference 2':'AO/WD08/2025/044','Reference 3':'','Next Hearing':'12/08/2025','Hearing Note':'First hearing scheduled','Closed Without Approval':'','Cancelled':''}
+    {'Client':sampleClients[0]||'Mehta Exports','Task Type *':'GSTR-1 Filing','Category':'GST','Bucket *':'recurring','Compliance Filing':'Yes','FY':'FY25-26','Quarter':'NA','Month':'Jul','Due Date *':'20/07/2025','Preparer':samplePrep,'Reviewer':sampleRev,'Status':'Pending','Frequency':'monthly','Filed Date':'','Ack Number':'','Ref FY':'','Reference 1':'','Reference 2':'','Reference 3':'','Next Hearing':'','Hearing Note':'','Closed Without Approval':'','Cancelled':''},
+    {'Client':sampleClients[1]||'Sunrise Pvt Ltd','Task Type *':'Advance Tax','Category':'Income Tax','Bucket *':'periodical','Compliance Filing':'Yes','FY':'FY25-26','Quarter':'Q2','Month':'NA','Due Date *':'15/09/2025','Preparer':samplePrep,'Reviewer':sampleRev,'Status':'Pending','Frequency':'quarterly','Filed Date':'','Ack Number':'','Ref FY':'','Reference 1':'','Reference 2':'','Reference 3':'','Next Hearing':'','Hearing Note':'','Closed Without Approval':'','Cancelled':''},
+    {'Client':sampleClients[2]||'Dr. Anil Shah','Task Type *':'Assessment - Scrutiny','Category':'Assessment','Bucket *':'assessment','Compliance Filing':'No','FY':'NA','Quarter':'NA','Month':'NA','Due Date *':'31/07/2025','Preparer':samplePrep,'Reviewer':sampleRev,'Status':'Pending','Frequency':'yearly','Filed Date':'','Ack Number':'','Ref FY':'FY24-25','Reference 1':'NTC/2025/00112','Reference 2':'AO/WD08/2025/044','Reference 3':'','Next Hearing':'12/08/2025','Hearing Note':'First hearing scheduled','Closed Without Approval':'','Cancelled':''}
   ];
 
   const ws = XLSX.utils.json_to_sheet(sample, {header:EXCEL_COLUMNS});
@@ -1171,7 +1172,7 @@ function buildTemplateWorkbook(people, clients, groups){
   const mList      = ['NA',...MONTH_NAMES];
   const maxRows    = Math.max(prepNames.length, revNames.length, catNames.length, fyListNA.length, qList.length, mList.length, 10);
 
-  const listsData  = [['Bucket','Status','Frequency','Preparer','Reviewer','Category','FY','Quarter','Month','Yes/Blank']];
+  const listsData  = [['Bucket','Status','Frequency','Preparer','Reviewer','Category','FY','Quarter','Month','Yes/Blank','Yes/No']];
   for(let i=0;i<maxRows;i++){
     listsData.push([
       ['recurring','periodical','onetime','assessment'][i]||'',
@@ -1183,7 +1184,8 @@ function buildTemplateWorkbook(people, clients, groups){
       fyListNA[i]||'',
       qList[i]||'',
       mList[i]||'',
-      ['Yes',''][i]||''
+      ['Yes',''][i]||'',
+      ['Yes','No'][i]||''
     ]);
   }
   const listsWs = XLSX.utils.aoa_to_sheet(listsData);
@@ -1193,18 +1195,22 @@ function buildTemplateWorkbook(people, clients, groups){
   // Column map: A=Client B=TaskType C=Category D=Bucket E=FY F=Quarter G=Month
   //   H=DueDate I=Preparer J=Reviewer K=Status L=Frequency M=FiledDate N=AckNo O=RefFY
   //   P=Ref1 Q=Ref2 R=Ref3 S=NextHearing T=HearingNote U=CWA V=Cancelled
+  // Col: A=Client B=TaskType* C=Category D=Bucket* E=ComplianceFiling F=FY G=Quarter H=Month
+  //      I=DueDate* J=Preparer K=Reviewer L=Status M=Frequency N=FiledDate O=AckNo P=RefFY
+  //      Q=Ref1 R=Ref2 S=Ref3 T=NextHearing U=HearingNote V=CWA W=Cancelled
   ws['!dataValidation'] = [
     {sqref:'D2:D1000',type:'list',formula1:'Lists!$A$2:$A$5',showDropDown:false,showErrorMessage:true,errorTitle:'Invalid bucket',error:'Must be: recurring, periodical, onetime or assessment'},
-    {sqref:'E2:E1000',type:'list',formula1:`Lists!$G$2:$G${fyListNA.length+1}`,showDropDown:false},
-    {sqref:'F2:F1000',type:'list',formula1:`Lists!$H$2:$H${qList.length+1}`,showDropDown:false},
-    {sqref:'G2:G1000',type:'list',formula1:`Lists!$I$2:$I${mList.length+1}`,showDropDown:false},
-    {sqref:'I2:I1000',type:'list',formula1:`Lists!$D$2:$D${prepNames.length+1}`,showDropDown:false},
-    {sqref:'J2:J1000',type:'list',formula1:`Lists!$E$2:$E${revNames.length+1}`,showDropDown:false},
-    {sqref:'K2:K1000',type:'list',formula1:'Lists!$B$2:$B$6',showDropDown:false,showErrorMessage:true,errorTitle:'Invalid status',error:'Must be: Pending, In review, Approved, Done or Cancelled'},
-    {sqref:'L2:L1000',type:'list',formula1:'Lists!$C$2:$C$5',showDropDown:false,showErrorMessage:true,errorTitle:'Invalid frequency',error:'Must be: none, monthly, quarterly or yearly'},
-    {sqref:'O2:O1000',type:'list',formula1:`Lists!$G$2:$G${fyListNA.length+1}`,showDropDown:false},
-    {sqref:'U2:U1000',type:'list',formula1:'Lists!$J$2:$J$3',showDropDown:false},
+    {sqref:'E2:E1000',type:'list',formula1:'Lists!$K$2:$K$4',showDropDown:false,showErrorMessage:true,errorTitle:'Invalid value',error:'Must be Yes or No'},
+    {sqref:'F2:F1000',type:'list',formula1:`Lists!$G$2:$G${fyListNA.length+1}`,showDropDown:false},
+    {sqref:'G2:G1000',type:'list',formula1:`Lists!$H$2:$H${qList.length+1}`,showDropDown:false},
+    {sqref:'H2:H1000',type:'list',formula1:`Lists!$I$2:$I${mList.length+1}`,showDropDown:false},
+    {sqref:'J2:J1000',type:'list',formula1:`Lists!$D$2:$D${prepNames.length+1}`,showDropDown:false},
+    {sqref:'K2:K1000',type:'list',formula1:`Lists!$E$2:$E${revNames.length+1}`,showDropDown:false},
+    {sqref:'L2:L1000',type:'list',formula1:'Lists!$B$2:$B$6',showDropDown:false,showErrorMessage:true,errorTitle:'Invalid status',error:'Must be: Pending, In review, Approved, Done or Cancelled'},
+    {sqref:'M2:M1000',type:'list',formula1:'Lists!$C$2:$C$5',showDropDown:false,showErrorMessage:true,errorTitle:'Invalid frequency',error:'Must be: none, monthly, quarterly or yearly'},
+    {sqref:'P2:P1000',type:'list',formula1:`Lists!$G$2:$G${fyListNA.length+1}`,showDropDown:false},
     {sqref:'V2:V1000',type:'list',formula1:'Lists!$J$2:$J$3',showDropDown:false},
+    {sqref:'W2:W1000',type:'list',formula1:'Lists!$J$2:$J$3',showDropDown:false},
   ];
   // Note: Category, Client, Task Type are free text — new values auto-create in app
 
@@ -1215,6 +1221,7 @@ function buildTemplateWorkbook(people, clients, groups){
     ['Task Type','Required','Any name','Existing task types are reused; new names create a new task type automatically'],
     ['Category','Optional','Any name — see Lists sheet for existing','New value auto-creates a category. Existing categories listed in Lists sheet for reference — type exactly to match.'],
     ['Bucket','Required','recurring / periodical / onetime / assessment','Must be one of these four exact values (lowercase)'],
+    ['Compliance Filing','Optional','Yes / No — dropdown','Yes = appears in Compliance History tracker. No = regular task only. Defaults to No.'],
     ['FY','Optional','NA / FY25-26 / FY24-25 etc — dropdown','Financial year of the task period. NA = not applicable'],
     ['Quarter','Optional','NA / Q1 / Q2 / Q3 / Q4 — dropdown','Quarter within the FY. NA = not a quarterly task'],
     ['Month','Optional','NA / Jan / Feb … Dec — dropdown','Month within the FY. NA = not a monthly task'],
@@ -1275,6 +1282,8 @@ function parseExcelRows(sheetRows){
     const taskLabel=(row['Task Type *']||row['Task Type']||'').toString().trim();
     const workCategory=(row['Category']||'').toString().trim();
     const bucket=(row['Bucket *']||row['Bucket']||'recurring').toString().trim().toLowerCase();
+    const complianceRaw=(row['Compliance Filing']||'').toString().trim().toLowerCase();
+    const isCompliance = complianceRaw==='yes'||complianceRaw==='true'||complianceRaw==='1';
     // Period derived from FY + Quarter + Month columns
     const exFY      = (row['FY']||'').toString().trim();
     const exQuarter = (row['Quarter']||'').toString().trim();
@@ -1314,7 +1323,7 @@ function parseExcelRows(sheetRows){
 
     parsed.push({
       rowNum: idx+2,
-      clientName, taskLabel, workCategory, bucket, period: period||null, due, prep, rev,
+      clientName, taskLabel, workCategory, bucket, isCompliance, period: period||null, due, prep, rev,
       status, freq, filedDate, ackNo, fy, ref1, ref2, ref3,
       nextHearing: nextHearing||undefined, hearingNote: hearingNote||undefined,
       errors
@@ -1864,6 +1873,191 @@ function CancelTaskModal(p){
   );
 }
 
+// ---------- Edit Task Modal ----------
+function EditTaskModal(p){
+  // p.row, p.taskDef, p.clients, p.team, p.groups, p.refLabels, p.onSave(patch), p.onClose
+  const r = p.row;
+  const td = p.taskDef||{};
+  const modalTeam = p.team||[];
+
+  // Resolve current per-assignment compliance (undefined = inherit)
+  const inheritedCompliance = !!td.isCompliance;
+  const [compOverride, setCompOverride] = useState(
+    r.isCompliance===true ? 'yes' : r.isCompliance===false ? 'no' : 'inherit'
+  );
+
+  const [clientId, setClientId]   = useState(r.cid||'');
+  const [fy,       setFy]         = useState(r.period ? (periodToComponents(r.period).fy||'') : '');
+  const [quarter,  setQuarter]    = useState(r.period ? (periodToComponents(r.period).quarter||'') : '');
+  const [month,    setMonth]      = useState(r.period ? (periodToComponents(r.period).month||'') : '');
+  const [due,      setDue]        = useState(r.due||'');
+  const [prep,     setPrep]       = useState(r.prep||'');
+  const [rev,      setRev]        = useState(r.rev||'');
+  const [freq,     setFreq]       = useState(r.freq||'none');
+  const [refFY,    setRefFY]      = useState(r.fy||'');
+  const [ref1,     setRef1]       = useState(r.ref1||'');
+  const [ref2,     setRef2]       = useState(r.ref2||'');
+  const [ref3,     setRef3]       = useState(r.ref3||'');
+
+  const inp  = {fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
+  const lbl  = {fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
+  const sec  = {fontSize:10,fontWeight:600,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8,marginTop:16,paddingBottom:4,borderBottom:'0.5px solid var(--color-border-tertiary)'};
+  const wrap = {marginBottom:12};
+
+  const buildPeriod=()=>{
+    const fyVal = (!fy||fy==='NA') ? null : fy;
+    const qVal  = (!quarter||quarter==='NA') ? null : quarter;
+    const mVal  = (!month||month==='NA') ? null : month;
+    return fyVal ? componentsToPeriod(fyVal,qVal,mVal) : null;
+  };
+
+  const handleSave=()=>{
+    const patch = {
+      cid: clientId||null,
+      period: buildPeriod(),
+      due,
+      prep, rev,
+      pi: modalTeam.findIndex(t=>t.id===prep),
+      ri: modalTeam.findIndex(t=>t.id===rev),
+      freq,
+      fy: refFY||undefined,
+      ref1: ref1||undefined, ref2: ref2||undefined, ref3: ref3||undefined,
+      // Per-assignment compliance override
+      isCompliance: compOverride==='yes' ? true : compOverride==='no' ? false : undefined
+    };
+    p.onSave(patch);
+    p.onClose();
+  };
+
+  const isAssessment = td.bucket==='assessment';
+
+  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1050,padding:16}},
+    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:500,maxHeight:'92vh',overflowY:'auto',boxShadow:'0 4px 32px rgba(0,0,0,0.18)'}},
+
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}},
+        e('div',{style:{fontSize:15,fontWeight:600,color:'var(--color-text-primary)'}},'Edit task'),
+        e('button',{onClick:p.onClose,style:{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--color-text-tertiary)',padding:4}},'✕')
+      ),
+      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},td.label||'Task'),
+
+      // Task type — read only (not editable, would break history)
+      e('div',{style:{...wrap,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',fontSize:11,color:'var(--color-text-secondary)'}},'Task type: ',e('strong',null,td.label),' · Bucket: ',e('strong',null,td.bucket),e('br'),e('span',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},'Task type cannot be changed here — it would break the history trail. If this was created under the wrong task type, cancel it and create a new one.')),
+
+      e('div',{style:sec},'Assignment'),
+
+      // Client
+      e('div',{style:wrap},
+        e('label',{style:lbl},'Client'),
+        e('select',{style:inp,value:clientId,onChange:ev=>setClientId(ev.target.value)},
+          e('option',{value:''},'— no client —'),
+          ...p.clients.map(c=>e('option',{key:c.id,value:c.id},c.name))
+        )
+      ),
+
+      // Period
+      e('div',{style:wrap},
+        e('label',{style:lbl},'Period'),
+        e('div',{style:{display:'flex',gap:8}},
+          e('select',{style:{...inp,flex:2},value:fy,onChange:ev=>setFy(ev.target.value)},
+            e('option',{value:''},'FY…'),
+            e('option',{value:'NA'},'NA'),
+            ...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f))
+          ),
+          e('select',{style:{...inp,flex:1},value:quarter,onChange:ev=>{setQuarter(ev.target.value);if(ev.target.value&&ev.target.value!=='NA')setMonth('NA');}},
+            e('option',{value:''},'Quarter'),
+            e('option',{value:'NA'},'NA'),
+            ...QUARTERS.map(q=>e('option',{key:q,value:q},q))
+          ),
+          e('select',{style:{...inp,flex:1},value:month,onChange:ev=>{setMonth(ev.target.value);if(ev.target.value&&ev.target.value!=='NA')setQuarter('NA');}},
+            e('option',{value:''},'Month'),
+            e('option',{value:'NA'},'NA'),
+            ...MONTH_NAMES.map(m=>e('option',{key:m,value:m},m))
+          )
+        ),
+        buildPeriod() ? e('div',{style:{fontSize:9,color:'#0F6E56',marginTop:4}},'Period: '+buildPeriod()) : null
+      ),
+
+      // Due date
+      e('div',{style:wrap},
+        e('label',{style:lbl},'Due date'),
+        e('input',{type:'date',style:inp,value:due,onChange:ev=>setDue(ev.target.value)})
+      ),
+
+      // Preparer / Reviewer
+      e('div',{style:{display:'flex',gap:10,...wrap}},
+        e('div',{style:{flex:1}},
+          e('label',{style:lbl},'Preparer'),
+          e('select',{style:inp,value:prep,onChange:ev=>setPrep(ev.target.value)},
+            modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
+        ),
+        e('div',{style:{flex:1}},
+          e('label',{style:lbl},'Reviewer'),
+          e('select',{style:inp,value:rev,onChange:ev=>setRev(ev.target.value)},
+            modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
+        )
+      ),
+
+      // Frequency
+      e('div',{style:wrap},
+        e('label',{style:lbl},'Frequency'),
+        e('select',{style:inp,value:freq,onChange:ev=>setFreq(ev.target.value)},
+          FREQUENCIES.map(f=>e('option',{key:f.id,value:f.id},f.label)))
+      ),
+
+      // Compliance override
+      e('div',{style:sec},'Compliance tracker'),
+      e('div',{style:{...wrap,padding:'10px 12px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},
+        e('div',{style:{fontSize:11,color:'var(--color-text-secondary)',marginBottom:8}},
+          'Task type default: ',e('strong',null,inheritedCompliance?'Compliance filing':'Not compliance')),
+        e('div',{style:{display:'flex',gap:6}},
+          [{val:'inherit',label:'Use default'},{val:'yes',label:'Yes — include in compliance tracker'},{val:'no',label:'No — exclude from compliance tracker'}].map(opt=>
+            e('label',{key:opt.val,style:{fontSize:11,display:'flex',alignItems:'center',gap:4,cursor:'pointer',
+              padding:'5px 10px',borderRadius:'var(--border-radius-md)',
+              background:compOverride===opt.val?'#EEEDFE':'transparent',
+              border:'0.5px solid '+(compOverride===opt.val?'#534AB7':'var(--color-border-secondary)'),
+              color:compOverride===opt.val?'#534AB7':'var(--color-text-secondary)'}},
+              e('input',{type:'radio',name:'compOverride',value:opt.val,checked:compOverride===opt.val,onChange:()=>setCompOverride(opt.val),style:{margin:0}}),
+              opt.label)
+          )
+        ),
+        compOverride==='no' ? e('div',{style:{fontSize:9,color:'#993C1D',marginTop:6}},'This assignment will not appear in Compliance History, even though the task type is marked as compliance.') : null,
+        compOverride==='yes' && !inheritedCompliance ? e('div',{style:{fontSize:9,color:'#0F6E56',marginTop:6}},'This assignment will appear in Compliance History, overriding the task type default.') : null
+      ),
+
+      // Assessment fields
+      isAssessment ? e(React.Fragment,null,
+        e('div',{style:sec},'Assessment details'),
+        e('div',{style:{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:8,...wrap}},
+          e('div',null,
+            e('label',{style:lbl},'Assessment FY'),
+            e('select',{style:inp,value:refFY,onChange:ev=>setRefFY(ev.target.value)},
+              e('option',{value:''},'—'),
+              ...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f)))
+          ),
+          e('div',null,
+            e('label',{style:lbl},(p.refLabels&&p.refLabels.ref1)||'Reference 1'),
+            e('input',{style:inp,value:ref1,onChange:ev=>setRef1(ev.target.value)})
+          ),
+          e('div',null,
+            e('label',{style:lbl},(p.refLabels&&p.refLabels.ref2)||'Reference 2'),
+            e('input',{style:inp,value:ref2,onChange:ev=>setRef2(ev.target.value)})
+          ),
+          e('div',null,
+            e('label',{style:lbl},(p.refLabels&&p.refLabels.ref3)||'Reference 3'),
+            e('input',{style:inp,value:ref3,onChange:ev=>setRef3(ev.target.value)})
+          )
+        ),
+        r.hearingLog&&r.hearingLog.length>0 ? e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:12,padding:'6px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},'📋 '+r.hearingLog.length+' hearing log '+( r.hearingLog.length===1?'entry':'entries')+' — export Excel to view full history. Next hearing date is editable from the task row.') : null
+      ) : null,
+
+      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8,paddingTop:12,borderTop:'0.5px solid var(--color-border-tertiary)'}},
+        e(Btn,{onClick:p.onClose},'Cancel'),
+        e(Btn,{pri:true,onClick:handleSave},'Save changes')
+      )
+    )
+  );
+}
+
 // ---------- Add / Edit Client modal ----------
 function AddClientModal(p){
   // p.client = existing client (for edit) or null (for new)
@@ -1981,7 +2175,13 @@ function AddTaskModal(p){
       p.onCreateTaskType({id:tid, label:newTaskLabel.trim(), group:newGroup, bucket, isCompliance:(isCompliance||isAssessment)});
     }
 
-    const finalPeriod = noPeriod ? null : buildPeriod();
+    // If existing task type and compliance/assessment flags changed, update it
+    if(tid === taskTypeId && selTaskDef){
+      const bucketForAssessment = isAssessment ? 'assessment' : (isAssessment===false && selTaskDef.bucket==='assessment' ? 'onetime' : selTaskDef.bucket);
+      if(selTaskDef.isCompliance !== isCompliance || selTaskDef.bucket !== bucketForAssessment){
+        p.onUpdateTaskType({...selTaskDef, isCompliance, bucket: bucketForAssessment});
+      }
+    }
     const finalClientId = noClient ? null : clientId;
     const pIdx = modalTeam.findIndex(t=>t.id===prep);
     const rIdx = modalTeam.findIndex(t=>t.id===rev);
@@ -2090,8 +2290,16 @@ function AddTaskModal(p){
         )
       ) : null,
 
-      // ── SECTION: Assignment ──
-      e('div',{style:sec},'Assignment'),
+      // Show compliance/assessment flags — for existing task type show current state (editable), for new show in purple box below
+      selTaskDef ? e('div',{style:{display:'flex',gap:16,padding:'8px 12px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',marginBottom:14}},
+        e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:5,cursor:'pointer',color:'var(--color-text-secondary)'}},
+          e('input',{type:'checkbox',checked:isCompliance,onChange:ev=>{setIsCompliance(ev.target.checked);},style:{margin:0}}),
+          'Add to Compliance tracker'),
+        e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:5,cursor:'pointer',color:'var(--color-text-secondary)'}},
+          e('input',{type:'checkbox',checked:isAssessment,onChange:ev=>{setIsAssessment(ev.target.checked);if(ev.target.checked)setIsCompliance(true);},style:{margin:0}}),
+          'Add to Assessment tracker'),
+        e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginLeft:'auto',alignSelf:'center'}},'These are properties of the task type — changing here updates it for all clients.')
+      ) : null,
 
       // Client
       e('div',{style:wrap},
@@ -2232,7 +2440,10 @@ function WorkTrackApp(p){
   const [editingClient,setEditingClient]=useState(null);
   const [reassignRow,setReassignRow]=useState(null);
   const [selfCompleteRow,setSelfCompleteRow]=useState(null);
-  const [cancelRow,setCancelRow]=useState(null); // null=adding new, obj=editing existing
+  const [cancelRow,setCancelRow]=useState(null);
+  const [editingRow,setEditingRow]=useState(null);
+
+  const handleEditTask=(rowId,patch)=>setCt(wrapCt(prev=>prev.map(r=>r.id===rowId?{...r,...patch}:r))); // null=adding new, obj=editing existing
   const [nextOccurDraft,setNextOccurDraft]=useState(null); // {row, period, due}
   const [bulkCreateTask,setBulkCreateTask]=useState(null); // taskDef or null
   const [showExcelModal,setShowExcelModal]=useState(false);
@@ -2300,9 +2511,12 @@ function WorkTrackApp(p){
   // Workflow: if preparer === reviewer, a single action goes straight Pending -> Done (and back).
   // If they differ: preparer's action moves Pending -> Review; reviewer's action moves Review -> Done.
   // Helper: given a row, decide if closing needs a prompt
-  // needsFilingPrompt: compliance tasks need date+ack when preparer marks Done (after approval)
-  // needsAssessmentPrompt: assessment tasks need FY+refs when closing
-  const needsFilingPrompt=(r)=>!!( taskDefs.find(t=>t.id===r.tid)||{}).isCompliance;
+  const isComplianceAssignment=(r)=>{
+    if(r.isCompliance===true) return true;
+    if(r.isCompliance===false) return false;
+    return !!( taskDefs.find(t=>t.id===r.tid)||{}).isCompliance;
+  };
+  const needsFilingPrompt=(r)=>isComplianceAssignment(r);
   const needsAssessmentPrompt=(r)=>( taskDefs.find(t=>t.id===r.tid)||{}).bucket==='assessment';
 
   const finaliseClose=(rowId, closeType, details)=>{
@@ -2419,6 +2633,7 @@ function WorkTrackApp(p){
   const goClient=cid=>{setFocusClient(cid);setView('clients');setExpCC(cid);setExpNT(null);};
 
   const handleCreateTaskType=newType=>setTaskDefs(wrapTaskDefs(prev=>[...prev,newType]));
+  const handleUpdateTaskType=updated=>setTaskDefs(wrapTaskDefs(prev=>prev.map(t=>t.id===updated.id?updated:t)));
   const handleAddAssignment=newRow=>setCt(wrapCt(prev=>[...prev,newRow]));
   const handleCreateGroup=label=>{
     const id='grp_'+uid();
@@ -2484,7 +2699,7 @@ function WorkTrackApp(p){
           label:r.taskLabel,
           group: grpMatch ? grpMatch.id : (nextGroups[0]?nextGroups[0].id:'gst'),
           bucket: r.bucket,
-          isCompliance:false
+          isCompliance: r.isCompliance||false
         });
       }
     });
@@ -2596,7 +2811,8 @@ function WorkTrackApp(p){
                 r.status==='pending' ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-check','aria-hidden':'true'}),'Close') : null,
                 r.status==='pending' ? e(Btn,{onClick:()=>{ if(confirm('Close without approval? This will be flagged.')) closeWithoutReview(r.id); },style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-shield-x','aria-hidden':'true'}),'Close without approval') : null,
                 r.status==='done' ? e(Btn,{onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-corner-up-left','aria-hidden':'true'}),'Reopen') : null,
-                isReviewerUser && r.status!=='done' ? e(Btn,{onClick:()=>setReassignRow(r),style:{marginLeft:'auto'}},e('i',{className:'ti ti-users','aria-hidden':'true'}),'Reassign') : null,
+                isReviewerUser && r.status!=='done' ? e(Btn,{onClick:()=>setEditingRow(r),style:{marginLeft:'auto'}},e('i',{className:'ti ti-pencil','aria-hidden':'true'}),'Edit') : null,
+                isReviewerUser && r.status!=='done' ? e(Btn,{onClick:()=>setReassignRow(r)},e('i',{className:'ti ti-users','aria-hidden':'true'}),'Reassign') : null,
                 isReviewerUser && r.status!=='done' ? e(Btn,{onClick:()=>setCancelRow(r),style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-ban','aria-hidden':'true'}),'Cancel') : null
               );
             }
@@ -2637,6 +2853,7 @@ function WorkTrackApp(p){
               // --- REVIEWER OVERRIDE ACTIONS (always visible to reviewer user) ---
               isReviewerUser && r.status!=='done'
                 ? e('div',{style:{marginLeft:'auto',display:'flex',gap:6}},
+                    e(Btn,{onClick:()=>setEditingRow(r)},e('i',{className:'ti ti-pencil','aria-hidden':'true'}),'Edit'),
                     e(Btn,{onClick:()=>setReassignRow(r)},e('i',{className:'ti ti-users','aria-hidden':'true'}),'Reassign'),
                     e(Btn,{onClick:()=>setCancelRow(r),style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-ban','aria-hidden':'true'}),'Cancel'),
                     r.status!=='done' ? e(Btn,{onClick:()=>{ if(confirm('Close without approval? This will be flagged.')) closeWithoutReview(r.id); },style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-shield-x','aria-hidden':'true'}),'No-approval close') : null
@@ -2966,11 +3183,15 @@ function WorkTrackApp(p){
   };
 
   const ComplianceView=()=>{
-    const complianceTaskDefs=taskDefs.filter(t=>t.isCompliance);
-    const allRows=ct.filter(r=>{
+    const isComplianceRow=(r)=>{
+      // Per-assignment override takes priority; falls back to task type
+      if(r.isCompliance===true) return true;
+      if(r.isCompliance===false) return false;
       const td=taskDefs.find(t=>t.id===r.tid);
       return td && td.isCompliance;
-    });
+    };
+    const complianceTaskDefs=taskDefs.filter(t=>t.isCompliance);
+    const allRows=ct.filter(r=>isComplianceRow(r));
     const fyOptions=[...new Set(allRows.map(r=>periodToFY(r.period)).filter(Boolean))].sort();
     const monthOptions=[...new Set(allRows.map(r=>periodToMonthLabel(r.period)).filter(Boolean))];
 
@@ -3223,6 +3444,7 @@ function WorkTrackApp(p){
     isReviewer: p.currentUser?.isReviewer,
     onClose:()=>setShowAddModal(false),
     onCreateTaskType:handleCreateTaskType,
+    onUpdateTaskType:handleUpdateTaskType,
     onAddAssignment:handleAddAssignment,
     onCreateGroup:handleCreateGroup,
     onAddClient:handleAddClient,
@@ -3251,6 +3473,14 @@ function WorkTrackApp(p){
     row:cancelRow,
     onSave:(reason)=>cancelTask(cancelRow.id,reason),
     onClose:()=>setCancelRow(null)
+  }) : null,
+  editingRow ? e(EditTaskModal,{
+    row:editingRow,
+    taskDef:taskDefs.find(t=>t.id===editingRow.tid)||{},
+    clients, team:TEAM, groups,
+    refLabels,
+    onSave:(patch)=>handleEditTask(editingRow.id,patch),
+    onClose:()=>setEditingRow(null)
   }) : null,
   bulkCreateTask ? e(BulkCreateModal,{
     taskDef:bulkCreateTask,
