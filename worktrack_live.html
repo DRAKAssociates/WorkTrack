@@ -1014,7 +1014,69 @@ function periodToFY(period){
 
 // ---------- Excel import/export ----------
 // Reference 1/2/3 columns are only meaningful for Assessment-bucket tasks; leave blank for other rows.
-const EXCEL_COLUMNS=['Client','Task Type','Work Category','Bucket','Period','Due Date','Preparer','Reviewer','Status','Frequency','Filed Date','Ack Number','FY','Reference 1','Reference 2','Reference 3','Next Hearing','Hearing Note','Closed Without Approval','Cancelled'];
+const EXCEL_COLUMNS=['Client','Task Type *','Category','Bucket *','FY','Quarter','Month','Due Date *','Preparer','Reviewer','Status','Frequency','Filed Date','Ack Number','Ref FY','Reference 1','Reference 2','Reference 3','Next Hearing','Hearing Note','Closed Without Approval','Cancelled'];
+
+// Format ISO date to dd/mm/yyyy for Excel display
+function fmtDate(iso){
+  if(!iso) return '';
+  const d = parseDueDate(iso);
+  if(!d) return iso;
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const yyyy = d.getFullYear();
+  return dd+'/'+mm+'/'+yyyy;
+}
+
+// Parse dd/mm/yyyy or YYYY-MM-DD or "20 Jul 2025" into ISO string
+function parseDisplayDate(val){
+  if(!val) return '';
+  val = val.toString().trim();
+  // dd/mm/yyyy
+  const dmy = val.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(dmy) return dmy[3]+'-'+dmy[2].padStart(2,'0')+'-'+dmy[1].padStart(2,'0');
+  // Already ISO
+  if(/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+  // "20 Jul 2025" etc — use parseDueDate
+  const d = parseDueDate(val);
+  if(d) return d.toISOString().slice(0,10);
+  return val;
+}
+
+// Split a period string back into FY, Quarter, Month for Excel export
+function periodToComponents(period){
+  if(!period || period==='NA') return {fy:'NA', quarter:'NA', month:'NA'};
+  // "Jun 2025" → month=Jun, fy=FY25-26
+  const mMatch = period.match(/^([A-Za-z]{3})\s(\d{4})$/);
+  if(mMatch){
+    const mo=mMatch[1], yr=parseInt(mMatch[2]);
+    const mi=MONTH_MAP[mo]??-1;
+    const fyStart = mi<=2 ? yr-1 : yr;
+    return {fy:'FY'+String(fyStart).slice(-2)+'-'+String(fyStart+1).slice(-2), quarter:'NA', month:mo};
+  }
+  // "Q1 FY26" → quarter=Q1, fy=FY25-26
+  const qMatch = period.match(/^(Q\d)\sFY(\d{2})$/);
+  if(qMatch){
+    const q=qMatch[1], yr=parseInt('20'+qMatch[2]);
+    return {fy:'FY'+String(yr-1).slice(-2)+'-'+String(yr).slice(-2), quarter:q, month:'NA'};
+  }
+  // "FY24-25" or "AY 2025-26" → fy only
+  return {fy:period, quarter:'NA', month:'NA'};
+}
+
+// Combine FY + Quarter + Month back into a period string for internal use
+function componentsToPeriod(fy, quarter, month){
+  if(!fy || fy==='NA') return null;
+  // Extract FY end year from "FY25-26" → 26 → 2026
+  const fyMatch = fy.match(/FY\d{2}-(\d{2})$/);
+  const fyEndYr = fyMatch ? parseInt('20'+fyMatch[1]) : null;
+  if(month && month!=='NA' && fyEndYr){
+    const mi = MONTH_MAP[month]??-1;
+    const calYr = mi<=2 ? fyEndYr : fyEndYr-1;
+    return month+' '+calYr;
+  }
+  if(quarter && quarter!=='NA') return quarter+' '+fy.replace('FY','FY').replace(/FY(\d{2})-(\d{2})/,'FY$2');
+  return fy;
+}
 
 function rowToExcelRecord(r, taskDefs, clients, groups, people){
   const td=taskDefs.find(t=>t.id===r.tid)||{};
@@ -1022,24 +1084,27 @@ function rowToExcelRecord(r, taskDefs, clients, groups, people){
   const grp=groups.find(g=>g.id===td.group);
   const prepName = (people&&people.find(p=>p.id===r.prep)?.name) || r.prep || '';
   const revName  = (people&&people.find(p=>p.id===r.rev)?.name)  || r.rev  || '';
+  const {fy:pFY, quarter:pQ, month:pM} = periodToComponents(r.period);
   return {
     'Client': cdef ? cdef.name : (r.cid ? r.cid : ''),
-    'Task Type': td.label || r.tid,
-    'Work Category': grp ? grp.label : (td.group||''),
-    'Bucket': td.bucket||'',
-    'Period': r.period||'',
-    'Due Date': r.due||'',
+    'Task Type *': td.label || r.tid,
+    'Category': grp ? grp.label : (td.group||''),
+    'Bucket *': td.bucket||'',
+    'FY': pFY,
+    'Quarter': pQ,
+    'Month': pM,
+    'Due Date *': fmtDate(r.due),
     'Preparer': prepName,
     'Reviewer': revName,
     'Status': stLabel(r.status),
     'Frequency': r.freq||'none',
-    'Filed Date': r.filedDate||'',
+    'Filed Date': fmtDate(r.filedDate),
     'Ack Number': r.ackNo||'',
-    'FY': r.fy||'',
+    'Ref FY': r.fy||'',
     'Reference 1': r.ref1||'',
     'Reference 2': r.ref2||'',
     'Reference 3': r.ref3||'',
-    'Next Hearing': r.nextHearing||'',
+    'Next Hearing': fmtDate(r.nextHearing),
     'Hearing Note': r.hearingNote||'',
     'Closed Without Approval': r.closedWithoutReview ? 'Yes' : '',
     'Cancelled': r.status==='cancelled' ? 'Yes'+(r.resignNote?' — '+r.resignNote:'') : ''
@@ -1070,16 +1135,130 @@ function exportToExcel(rows, taskDefs, clients, groups, people, ct, filename){
   XLSX.writeFile(wb,filename);
 }
 
-function buildTemplateWorkbook(){
+function buildTemplateWorkbook(people, clients, groups){
+  // Sample rows using real names where available
+  const preparerNames = (people||[]).filter(p=>!CONFIG.reviewerIds.includes(p.id)).map(p=>p.name);
+  const reviewerNames = (people||[]).filter(p=>CONFIG.reviewerIds.includes(p.id)).map(p=>p.name);
+  const samplePrep = preparerNames[0]||'Aniket';
+  const sampleRev  = reviewerNames[0]||'Deepak Rao';
+  const sampleClients = clients&&clients.length ? clients.slice(0,3).map(c=>c.name) : ['Mehta Exports','Sunrise Pvt Ltd','Dr. Anil Shah'];
+
   const sample=[
-    {'Client':'Mehta Exports','Task Type':'GSTR-1 Filing','Work Category':'GST','Bucket':'recurring','Period':'Jul 2025','Due Date':'20 Jul','Preparer':'PK','Reviewer':'RK','Status':'Pending','Frequency':'monthly','Filed Date':'','Ack Number':'','FY':'','Reference 1':'','Reference 2':'','Reference 3':''},
-    {'Client':'Sunrise Pvt Ltd','Task Type':'Advance Tax','Work Category':'Income Tax','Bucket':'periodical','Period':'Q2 FY26','Due Date':'15 Sep','Preparer':'PK','Reviewer':'RK','Status':'Pending','Frequency':'quarterly','Filed Date':'','Ack Number':'','FY':'','Reference 1':'','Reference 2':'','Reference 3':''},
-    {'Client':'Dr. Anil Shah','Task Type':'ITR-3 Filing','Work Category':'Income Tax','Bucket':'assessment','Period':'AY 2025-26','Due Date':'31 Jul','Preparer':'AM','Reviewer':'RK','Status':'Pending','Frequency':'yearly','Filed Date':'','Ack Number':'','FY':'FY24-25','Reference 1':'NTC/2025/00112','Reference 2':'AO/WD08/2025/044','Reference 3':'12 Aug 2025'}
+    {'Client':sampleClients[0]||'Mehta Exports','Task Type *':'GSTR-1 Filing','Category':'GST','Bucket *':'recurring','FY':'FY25-26','Quarter':'NA','Month':'Jul','Due Date *':'20/07/2025','Preparer':samplePrep,'Reviewer':sampleRev,'Status':'Pending','Frequency':'monthly','Filed Date':'','Ack Number':'','Ref FY':'','Reference 1':'','Reference 2':'','Reference 3':'','Next Hearing':'','Hearing Note':'','Closed Without Approval':'','Cancelled':''},
+    {'Client':sampleClients[1]||'Sunrise Pvt Ltd','Task Type *':'Advance Tax','Category':'Income Tax','Bucket *':'periodical','FY':'FY25-26','Quarter':'Q2','Month':'NA','Due Date *':'15/09/2025','Preparer':samplePrep,'Reviewer':sampleRev,'Status':'Pending','Frequency':'quarterly','Filed Date':'','Ack Number':'','Ref FY':'','Reference 1':'','Reference 2':'','Reference 3':'','Next Hearing':'','Hearing Note':'','Closed Without Approval':'','Cancelled':''},
+    {'Client':sampleClients[2]||'Dr. Anil Shah','Task Type *':'Assessment - Scrutiny','Category':'Assessment','Bucket *':'assessment','FY':'NA','Quarter':'NA','Month':'NA','Due Date *':'31/07/2025','Preparer':samplePrep,'Reviewer':sampleRev,'Status':'Pending','Frequency':'yearly','Filed Date':'','Ack Number':'','Ref FY':'FY24-25','Reference 1':'NTC/2025/00112','Reference 2':'AO/WD08/2025/044','Reference 3':'','Next Hearing':'12/08/2025','Hearing Note':'First hearing scheduled','Closed Without Approval':'','Cancelled':''}
   ];
-  const ws=XLSX.utils.json_to_sheet(sample,{header:EXCEL_COLUMNS});
-  ws['!cols']=EXCEL_COLUMNS.map(c=>({wch:Math.max(14,c.length+2)}));
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Tasks');
+
+  const ws = XLSX.utils.json_to_sheet(sample, {header:EXCEL_COLUMNS});
+  ws['!cols'] = EXCEL_COLUMNS.map(c=>({wch:Math.max(16,c.length+4)}));
+
+  // Colour header row
+  const headerStyle = {font:{bold:true}, fill:{fgColor:{rgb:'EEEDFE'}}, alignment:{horizontal:'center'}};
+  EXCEL_COLUMNS.forEach((_,i)=>{
+    const cell = XLSX.utils.encode_cell({r:0,c:i});
+    if(ws[cell]) ws[cell].s = headerStyle;
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Tasks');
+
+  // ── Lists sheet — source for dropdown validation ──
+  const prepNames  = preparerNames.length ? preparerNames : ['Aniket','Priyanka','Rubina','Nandini'];
+  const revNames   = reviewerNames.length ? reviewerNames : ['Deepak Rao','Amruta Kulkrani'];
+  const catNames   = (groups&&groups.length) ? groups.map(g=>g.label) : ['GST','Income Tax','TDS','ROC'];
+  const fyListNA   = ['NA',...FY_OPTIONS];
+  const qList      = ['NA','Q1','Q2','Q3','Q4'];
+  const mList      = ['NA',...MONTH_NAMES];
+  const maxRows    = Math.max(prepNames.length, revNames.length, catNames.length, fyListNA.length, qList.length, mList.length, 10);
+
+  const listsData  = [['Bucket','Status','Frequency','Preparer','Reviewer','Category','FY','Quarter','Month','Yes/Blank']];
+  for(let i=0;i<maxRows;i++){
+    listsData.push([
+      ['recurring','periodical','onetime','assessment'][i]||'',
+      ['Pending','In review','Approved','Done','Cancelled'][i]||'',
+      ['none','monthly','quarterly','yearly'][i]||'',
+      prepNames[i]||'',
+      revNames[i]||'',
+      catNames[i]||'',
+      fyListNA[i]||'',
+      qList[i]||'',
+      mList[i]||'',
+      ['Yes',''][i]||''
+    ]);
+  }
+  const listsWs = XLSX.utils.aoa_to_sheet(listsData);
+  listsWs['!cols'] = Array(10).fill({wch:20});
+  XLSX.utils.book_append_sheet(wb, listsWs, 'Lists');
+
+  // Column map: A=Client B=TaskType C=Category D=Bucket E=FY F=Quarter G=Month
+  //   H=DueDate I=Preparer J=Reviewer K=Status L=Frequency M=FiledDate N=AckNo O=RefFY
+  //   P=Ref1 Q=Ref2 R=Ref3 S=NextHearing T=HearingNote U=CWA V=Cancelled
+  ws['!dataValidation'] = [
+    {sqref:'D2:D1000',type:'list',formula1:'Lists!$A$2:$A$5',showDropDown:false,showErrorMessage:true,errorTitle:'Invalid bucket',error:'Must be: recurring, periodical, onetime or assessment'},
+    {sqref:'E2:E1000',type:'list',formula1:`Lists!$G$2:$G${fyListNA.length+1}`,showDropDown:false},
+    {sqref:'F2:F1000',type:'list',formula1:`Lists!$H$2:$H${qList.length+1}`,showDropDown:false},
+    {sqref:'G2:G1000',type:'list',formula1:`Lists!$I$2:$I${mList.length+1}`,showDropDown:false},
+    {sqref:'I2:I1000',type:'list',formula1:`Lists!$D$2:$D${prepNames.length+1}`,showDropDown:false},
+    {sqref:'J2:J1000',type:'list',formula1:`Lists!$E$2:$E${revNames.length+1}`,showDropDown:false},
+    {sqref:'K2:K1000',type:'list',formula1:'Lists!$B$2:$B$6',showDropDown:false,showErrorMessage:true,errorTitle:'Invalid status',error:'Must be: Pending, In review, Approved, Done or Cancelled'},
+    {sqref:'L2:L1000',type:'list',formula1:'Lists!$C$2:$C$5',showDropDown:false,showErrorMessage:true,errorTitle:'Invalid frequency',error:'Must be: none, monthly, quarterly or yearly'},
+    {sqref:'O2:O1000',type:'list',formula1:`Lists!$G$2:$G${fyListNA.length+1}`,showDropDown:false},
+    {sqref:'U2:U1000',type:'list',formula1:'Lists!$J$2:$J$3',showDropDown:false},
+    {sqref:'V2:V1000',type:'list',formula1:'Lists!$J$2:$J$3',showDropDown:false},
+  ];
+  // Note: Category, Client, Task Type are free text — new values auto-create in app
+
+  // ── Field Guide sheet ──
+  const guide = [
+    ['Column','Required?','Valid values / format','Notes'],
+    ['Client','Optional','Any name','Must match an existing client name exactly, or a new client will be created automatically'],
+    ['Task Type','Required','Any name','Existing task types are reused; new names create a new task type automatically'],
+    ['Category','Optional','Any name — see Lists sheet for existing','New value auto-creates a category. Existing categories listed in Lists sheet for reference — type exactly to match.'],
+    ['Bucket','Required','recurring / periodical / onetime / assessment','Must be one of these four exact values (lowercase)'],
+    ['FY','Optional','NA / FY25-26 / FY24-25 etc — dropdown','Financial year of the task period. NA = not applicable'],
+    ['Quarter','Optional','NA / Q1 / Q2 / Q3 / Q4 — dropdown','Quarter within the FY. NA = not a quarterly task'],
+    ['Month','Optional','NA / Jan / Feb … Dec — dropdown','Month within the FY. NA = not a monthly task'],
+    ['Due Date','Required','dd/mm/yyyy (e.g. 20/07/2025)','Also accepts YYYY-MM-DD or 20 Jul 2025'],
+    ['Preparer','Optional', preparerNames.join(' / ')||'Full name of preparer','Use full name exactly as in the People list'],
+    ['Reviewer','Optional', reviewerNames.join(' / ')||'Full name of reviewer','Use full name exactly as in the People list'],
+    ['Status','Optional','Pending / In review / Approved / Done / Cancelled','Defaults to Pending if blank'],
+    ['Frequency','Optional','none / monthly / quarterly / yearly','Defaults to none if blank'],
+    ['Filed Date','Optional','dd/mm/yyyy','Only for compliance tasks that have been filed'],
+    ['Ack Number','Optional','Any text','Acknowledgement number after filing'],
+    ['Ref FY','Optional','NA / FY24-25 / FY25-26 etc — dropdown','Assessment financial year — only for assessment bucket. Different from the period FY above.'],
+    ['Reference 1','Optional','Any text','Notice No. or first custom reference'],
+    ['Reference 2','Optional','Any text','AO Order Ref or second custom reference'],
+    ['Reference 3','Optional','Any text','Hearing Ref or third custom reference'],
+    ['Next Hearing','Optional','dd/mm/yyyy','Assessment next hearing date — feeds urgency filter'],
+    ['Hearing Note','Optional','Any text','Short note about the next hearing (e.g. "Adjourned — notice expected")'],
+    ['Closed Without Approval','Optional','Yes or blank','Flags the task as closed without reviewer approval'],
+    ['Cancelled','Optional','Yes or blank','Marks the task as cancelled'],
+    ['','','',''],
+    ['NOTES','','',''],
+    ['1. Do not change column headers','','',''],
+    ['2. Delete the sample rows before importing','','',''],
+    ['3. Use Append mode to add rows; Replace mode to overwrite all data','','',''],
+    ['4. Preparer and Reviewer must match names in your People list exactly','','',''],
+    ...(people&&people.length ? [
+      ['','','',''],
+      ['YOUR PEOPLE LIST','','',''],
+      ['Name','Role','',''],
+      ...(people.map(p=>[p.name, CONFIG.reviewerIds.includes(p.id)?'Reviewer':'Preparer','','']))
+    ]:[]),
+    ...(groups&&groups.length ? [
+      ['','','',''],
+      ['YOUR WORK CATEGORIES','','',''],
+      ['Category Name','','',''],
+      ...(groups.map(g=>[g.label,'','','']))
+    ]:[])
+  ];
+
+  const guideWs = XLSX.utils.aoa_to_sheet(guide);
+  guideWs['!cols'] = [{wch:28},{wch:12},{wch:50},{wch:70}];
+  // Bold the header row of the guide
+  ['A1','B1','C1','D1'].forEach(cell=>{ if(guideWs[cell]) guideWs[cell].s={font:{bold:true}}; });
+  XLSX.utils.book_append_sheet(wb, guideWs, 'Field Guide');
+
   return wb;
 }
 
@@ -1092,22 +1271,39 @@ function parseExcelRows(sheetRows){
   sheetRows.forEach((row,idx)=>{
     const errors=[];
     const clientName=(row['Client']||'').toString().trim();
-    const taskLabel=(row['Task Type']||'').toString().trim();
-    const workCategory=(row['Work Category']||'').toString().trim();
-    const bucket=(row['Bucket']||'recurring').toString().trim().toLowerCase();
-    const period=(row['Period']||'').toString().trim();
-    const due=(row['Due Date']||'').toString().trim();
-    const prep=(row['Preparer']||'').toString().trim().toUpperCase();
-    const rev=(row['Reviewer']||'').toString().trim().toUpperCase();
+    // Support both starred and non-starred header names
+    const taskLabel=(row['Task Type *']||row['Task Type']||'').toString().trim();
+    const workCategory=(row['Category']||'').toString().trim();
+    const bucket=(row['Bucket *']||row['Bucket']||'recurring').toString().trim().toLowerCase();
+    // Period derived from FY + Quarter + Month columns
+    const exFY      = (row['FY']||'').toString().trim();
+    const exQuarter = (row['Quarter']||'').toString().trim();
+    const exMonth   = (row['Month']||'').toString().trim();
+    const fyVal  = (!exFY||exFY==='NA') ? null : exFY;
+    const qVal   = (!exQuarter||exQuarter==='NA') ? null : exQuarter;
+    const mVal   = (!exMonth||exMonth==='NA') ? null : exMonth;
+    const period = fyVal ? componentsToPeriod(fyVal, qVal, mVal) : (row['Period']||'').toString().trim()||null; // fallback to Period column if present
+    const due=parseDisplayDate((row['Due Date *']||row['Due Date']||'').toString().trim());
+    // Resolve preparer/reviewer — accept name or ID
+    const resolvePerson = (val) => {
+      if(!val) return '';
+      const byId = (p.people||[]).find(x=>x.id.toLowerCase()===val.toLowerCase());
+      if(byId) return byId.id;
+      const byName = (p.people||[]).find(x=>x.name.toLowerCase()===val.toLowerCase());
+      if(byName) return byName.id;
+      return val.toUpperCase(); // fallback — use as-is
+    };
+    const prep = resolvePerson((row['Preparer']||'').toString().trim());
+    const rev  = resolvePerson((row['Reviewer']||'').toString().trim());
     const statusRaw=(row['Status']||'Pending').toString().trim().toLowerCase();
     const freqRaw=(row['Frequency']||'none').toString().trim().toLowerCase();
-    const filedDate=(row['Filed Date']||'').toString().trim();
+    const filedDate=parseDisplayDate((row['Filed Date']||'').toString().trim());
     const ackNo=(row['Ack Number']||'').toString().trim();
-    const fy=(row['FY']||'').toString().trim();
+    const fy=(row['Ref FY']||row['FY Assessment']||'').toString().trim();
     const ref1=(row['Reference 1']||'').toString().trim();
     const ref2=(row['Reference 2']||'').toString().trim();
     const ref3=(row['Reference 3']||'').toString().trim();
-    const nextHearing=(row['Next Hearing']||'').toString().trim();
+    const nextHearing=parseDisplayDate((row['Next Hearing']||'').toString().trim());
     const hearingNote=(row['Hearing Note']||'').toString().trim();
 
     if(!taskLabel) errors.push('Task Type is required');
@@ -1268,7 +1464,7 @@ function ExcelImportModal(p){
   };
 
   const downloadTemplate=()=>{
-    const wb=buildTemplateWorkbook();
+    const wb=buildTemplateWorkbook(p.people, p.clients, p.groups);
     XLSX.writeFile(wb,'worktrack_import_template.xlsx');
   };
 
@@ -3064,7 +3260,9 @@ function WorkTrackApp(p){
   }) : null,
   showExcelModal ? e(ExcelImportModal,{
     onClose:()=>setShowExcelModal(false),
-    onImport:handleExcelImport
+    onImport:handleExcelImport,
+    people: TEAM.map(t=>({id:t.id,name:t.name})),
+    clients, groups
   }) : null,
   closingPrompt ? (()=>{
     const row=ct.find(r=>r.id===closingPrompt.rowId);
@@ -3084,7 +3282,7 @@ function WorkTrackApp(p){
       ),
       e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Views'),
       sbItem('dashboard','Dashboard'),sbItem('clients','Clients'),sbItem('compliance','Compliance history'),sbItem('assessment','Assessment tracking'),
-      e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Work type'),
+      e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Category'),
       ...groups.map(g=>sbItem(g.id,g.label)),
       e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Team'),
       ...TEAM.map(t=>sbItem(t.id, t.id===CURRENT_USER ? t.name+' (you)' : t.name)),
