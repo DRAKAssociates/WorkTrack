@@ -1273,7 +1273,7 @@ const STATUS_LABEL_TO_KEY={'pending':'pending','in review':'review','review':'re
 const FREQ_VALID=['none','monthly','quarterly','yearly'];
 
 // Parses raw sheet rows into normalized import records + per-row validation errors.
-function parseExcelRows(sheetRows){
+function parseExcelRows(sheetRows, people){
   const parsed=[];
   sheetRows.forEach((row,idx)=>{
     const errors=[];
@@ -1291,16 +1291,16 @@ function parseExcelRows(sheetRows){
     const fyVal  = (!exFY||exFY==='NA') ? null : exFY;
     const qVal   = (!exQuarter||exQuarter==='NA') ? null : exQuarter;
     const mVal   = (!exMonth||exMonth==='NA') ? null : exMonth;
-    const period = fyVal ? componentsToPeriod(fyVal, qVal, mVal) : (row['Period']||'').toString().trim()||null; // fallback to Period column if present
+    const period = fyVal ? componentsToPeriod(fyVal, qVal, mVal) : (row['Period']||'').toString().trim()||null;
     const due=parseDisplayDate((row['Due Date *']||row['Due Date']||'').toString().trim());
     // Resolve preparer/reviewer — accept name or ID
     const resolvePerson = (val) => {
       if(!val) return '';
-      const byId = (p.people||[]).find(x=>x.id.toLowerCase()===val.toLowerCase());
+      const byId = (people||[]).find(x=>x.id.toLowerCase()===val.toLowerCase());
       if(byId) return byId.id;
-      const byName = (p.people||[]).find(x=>x.name.toLowerCase()===val.toLowerCase());
+      const byName = (people||[]).find(x=>x.name.toLowerCase()===val.toLowerCase());
       if(byName) return byName.id;
-      return val.toUpperCase(); // fallback — use as-is
+      return val.toUpperCase();
     };
     const prep = resolvePerson((row['Preparer']||'').toString().trim());
     const rev  = resolvePerson((row['Reviewer']||'').toString().trim());
@@ -1456,7 +1456,7 @@ function ExcelImportModal(p){
         const wb=XLSX.read(evt.target.result,{type:'array'});
         const sheetName=wb.SheetNames[0];
         const sheetRows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:''});
-        setParsed(parseExcelRows(sheetRows));
+        setParsed(parseExcelRows(sheetRows, p.people||[]));
       }catch(err){
         alert('Could not read this file. Make sure it is a valid .xlsx file.\n\n'+err.message);
       }
