@@ -3022,6 +3022,7 @@ function WorkTrackApp(p){
               return e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
                 e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'You are both preparer and reviewer.'),
                 r.status==='pending' ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-check','aria-hidden':'true'}),'Close') : null,
+                r.status==='approved' ? e(Btn,{pri:true,onClick:()=>preparerMarkDone(r.id)},e('i',{className:'ti ti-check','aria-hidden':'true'}),'Mark as done') : null,
                 r.status==='pending' ? e(Btn,{onClick:()=>{ if(confirm('Close without approval? This will be flagged.')) closeWithoutReview(r.id); },style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-shield-x','aria-hidden':'true'}),'Close without approval') : null,
                 r.status==='done' ? e(Btn,{onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-corner-up-left','aria-hidden':'true'}),'Reopen') : null,
                 isReviewerUser && r.status!=='done' ? e(Btn,{onClick:()=>setEditingRow(r),style:{marginLeft:'auto'}},e('i',{className:'ti ti-pencil','aria-hidden':'true'}),'Edit') : null,
