@@ -2551,14 +2551,20 @@ function WorkTrackApp(p){
   const clearTaskOverride=tid=>setTaskOverrides(prev=>{const n={...prev};delete n[tid];return n;});
 
   // Auto-save: whenever ct/clients/taskDefs/groups change, notify parent
-  const saveToSharePoint=(newCt,newGroups,newTaskDefs,newClients)=>{
+  // Keep a ref to the latest data so saveToSharePoint always has fresh values
+  // (React closures can capture stale state when multiple setState calls happen in sequence)
+  const latestData = React.useRef({ct, groups, taskDefs, clients});
+  React.useEffect(()=>{ latestData.current = {ct, groups, taskDefs, clients}; }, [ct, groups, taskDefs, clients]);
+
+  const saveToSharePoint=(newCt, newGroups, newTaskDefs, newClients)=>{
     if(p.onDataChange){
+      const latest = latestData.current;
       p.onDataChange({
-        ct:newCt||ct,
-        groups:newGroups||groups,
-        taskDefs:newTaskDefs||taskDefs,
-        clients:newClients||clients,
-        people: p.initialData.people, // preserve original people data with correct roles
+        ct:        newCt       || latest.ct,
+        groups:    newGroups   || latest.groups,
+        taskDefs:  newTaskDefs || latest.taskDefs,
+        clients:   newClients  || latest.clients,
+        people:    p.initialData.people,
         refLabels
       });
     }
@@ -2790,11 +2796,15 @@ function WorkTrackApp(p){
       nextCt.push({id:uid(),...newRowData,st:[]});
     });
 
-    // 5. Commit all at once
+    // 5. Commit all at once to React state
     setGroups(nextGroups);
     setClients(nextClients);
     setTaskDefs(nextDefs);
     setCt(nextCt);
+
+    // 6. Save immediately — pass ALL updated data explicitly so nothing is stale
+    // Cannot use wrapCt here because taskDefs/clients/groups are also changing in the same call
+    saveToSharePoint(nextCt, nextGroups, nextDefs, nextClients);
   };
 
   const sbItem=(v,label)=>e('div',{key:v,onClick:()=>goView(v),style:{display:'flex',alignItems:'center',gap:7,padding:'6px 12px',fontSize:12,color:view===v?'#534AB7':'var(--color-text-secondary)',cursor:'pointer',borderLeft:view===v?'2px solid #534AB7':'2px solid transparent',fontWeight:view===v?500:400,background:view===v?'var(--color-background-primary)':'transparent'}},label);
