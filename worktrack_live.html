@@ -2231,6 +2231,7 @@ function AddTaskModal(p){
   const [noClient, setNoClient] = useState(false);
   const [addingClient, setAddingClient] = useState(false);
   const [clientDraft,  setClientDraft]  = useState('');
+  const [pendingNewClient, setPendingNewClient] = useState(null);
   const [clientSearch, setClientSearch] = useState('');
   const [showClientDrop, setShowClientDrop] = useState(false);
 
@@ -2280,14 +2281,17 @@ function AddTaskModal(p){
 
   const handleSubmit=()=>{
     setFormError('');
-    // Validate task type
     if(isNewType && !newTaskLabel.trim()){ setFormError('Enter a task type name.'); return; }
     if(isNewType && !newGroup){ setFormError('Select or create a work category.'); return; }
     if(!due){ setFormError('Due date is required.'); return; }
     if(!noClient && !clientId){ setFormError('Select or add a client, or tick "Internal task".'); return; }
 
-    // Auto-create task type if new — reuse existing if same label already exists
     let tid = taskTypeId;
+    let newTaskType = null;
+    let updatedTaskType = null;
+    let newClientObj = null;
+
+    // Resolve task type
     if(isNewType){
       const existing = p.taskDefs.find(t=>t.label.toLowerCase()===newTaskLabel.trim().toLowerCase());
       if(existing){
@@ -2295,29 +2299,38 @@ function AddTaskModal(p){
       } else {
         tid = 'tt_'+uid();
         const bucket = isAssessment ? 'assessment' : newBucket;
-        p.onCreateTaskType({id:tid, label:newTaskLabel.trim(), group:newGroup, bucket, isCompliance:(isCompliance||isAssessment)});
+        newTaskType = {id:tid, label:newTaskLabel.trim(), group:newGroup, bucket, isCompliance:(isCompliance||isAssessment)};
+      }
+    } else if(selTaskDef){
+      const bucketForAssessment = isAssessment ? 'assessment' : (isAssessment===false && selTaskDef.bucket==='assessment' ? 'onetime' : selTaskDef.bucket);
+      if(selTaskDef.isCompliance !== isCompliance || selTaskDef.bucket !== bucketForAssessment){
+        updatedTaskType = {...selTaskDef, isCompliance, bucket: bucketForAssessment};
       }
     }
 
-    // If existing task type and compliance/assessment flags changed, update it
-    if(tid === taskTypeId && selTaskDef){
-      const bucketForAssessment = isAssessment ? 'assessment' : (isAssessment===false && selTaskDef.bucket==='assessment' ? 'onetime' : selTaskDef.bucket);
-      if(selTaskDef.isCompliance !== isCompliance || selTaskDef.bucket !== bucketForAssessment){
-        p.onUpdateTaskType({...selTaskDef, isCompliance, bucket: bucketForAssessment});
-      }
-    }
     const finalClientId = noClient ? null : clientId;
     const finalPeriod = noPeriod ? null : buildPeriod();
     const pIdx = modalTeam.findIndex(t=>t.id===prep);
     const rIdx = modalTeam.findIndex(t=>t.id===rev);
-    p.onAddAssignment({
+
+    const assignment = {
       id:uid(), tid, cid:finalClientId, period:finalPeriod, due,
       prep, rev, pi:pIdx>=0?pIdx:0, ri:rIdx>=0?rIdx:0,
       status:'pending', od:false,
       freq: isRecurring ? freq : 'none',
       isPrivate: isPrivate && !!p.isReviewer,
-      st:[]
-    });
+      hearingLog:[], st:[]
+    };
+
+    // Single atomic call — creates task type + client + assignment in one save
+    if(p.onAddTask){
+      p.onAddTask({newTaskType, updatedTaskType, newClient:pendingNewClient, newGroup:null, assignment});
+    } else {
+      // fallback
+      if(newTaskType) p.onCreateTaskType(newTaskType);
+      if(updatedTaskType) p.onUpdateTaskType(updatedTaskType);
+      p.onAddAssignment(assignment);
+    }
     p.onClose();
   };
 
@@ -2438,10 +2451,15 @@ function AddTaskModal(p){
             ? e('div',{style:{display:'flex',gap:6}},
                 e('input',{style:inp,autoFocus:true,placeholder:'New client name…',value:clientDraft,
                   onChange:ev=>setClientDraft(ev.target.value),
-                  onKeyDown:ev=>{if(ev.key==='Enter'&&clientDraft.trim()){const c=p.onAddClient(clientDraft.trim(),'monthly');if(c){setClientId(c.id);setClientSearch(c.name);setAddingClient(false);setClientDraft('');}}
-                    if(ev.key==='Escape'){setAddingClient(false);setClientDraft('');}}
+                  onKeyDown:ev=>{if(ev.key==='Enter'&&clientDraft.trim()){
+                    const c={id:'cl_'+uid(),name:clientDraft.trim(),defaultFreq:'monthly'};
+                    setPendingNewClient(c);setClientId(c.id);setClientSearch(c.name);setAddingClient(false);setClientDraft('');
+                  } if(ev.key==='Escape'){setAddingClient(false);setClientDraft('');}}
                 }),
-                e(Btn,{onClick:()=>{if(clientDraft.trim()){const c=p.onAddClient(clientDraft.trim(),'monthly');if(c){setClientId(c.id);setClientSearch(c.name);setAddingClient(false);setClientDraft('');}}}}, 'Add'),
+                e(Btn,{onClick:()=>{if(clientDraft.trim()){
+                  const c={id:'cl_'+uid(),name:clientDraft.trim(),defaultFreq:'monthly'};
+                  setPendingNewClient(c);setClientId(c.id);setClientSearch(c.name);setAddingClient(false);setClientDraft('');
+                }}}, 'Add'),
                 e(Btn,{onClick:()=>{setAddingClient(false);setClientDraft('');}}, '✕')
               )
             : e('div',{style:{position:'relative'}},
@@ -2457,7 +2475,7 @@ function AddTaskModal(p){
                   onMouseDown:()=>{setClientId('');setClientSearch('');setShowClientDrop(true);}
                 },'✕') : null,
                 showClientDrop && e('div',{style:{position:'absolute',top:'100%',left:0,right:0,background:'var(--color-background-primary)',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',boxShadow:'0 4px 16px rgba(0,0,0,0.12)',zIndex:100,maxHeight:200,overflowY:'auto',marginTop:2}},
-                  p.clients.filter(c=>c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(c=>
+                  [...p.clients, ...(pendingNewClient&&!p.clients.find(c=>c.id===pendingNewClient.id)?[pendingNewClient]:[])].filter(c=>c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(c=>
                     e('div',{key:c.id,
                       onMouseDown:()=>{setClientId(c.id);setClientSearch(c.name);setShowClientDrop(false);},
                       style:{padding:'8px 12px',fontSize:12,cursor:'pointer',borderBottom:'0.5px solid var(--color-border-tertiary)',
@@ -2806,6 +2824,33 @@ function WorkTrackApp(p){
   const handleCreateTaskType=newType=>setTaskDefs(wrapTaskDefs(prev=>[...prev,newType]));
   const handleUpdateTaskType=updated=>setTaskDefs(wrapTaskDefs(prev=>prev.map(t=>t.id===updated.id?updated:t)));
   const handleAddAssignment=newRow=>setCt(wrapCt(prev=>[...prev,newRow]));
+
+  // Atomic: create task type + optional new client + assignment in ONE save
+  const handleAddTask=({newTaskType, updatedTaskType, newClient, newGroup, assignment})=>{
+    const latest = latestData.current;
+    let nextTaskDefs = latest.taskDefs;
+    let nextClients  = latest.clients;
+    let nextGroups   = latest.groups;
+
+    if(newGroup)       nextGroups   = [...nextGroups, newGroup];
+    if(newTaskType)    nextTaskDefs = [...nextTaskDefs, newTaskType];
+    if(updatedTaskType) nextTaskDefs = nextTaskDefs.map(t=>t.id===updatedTaskType.id?updatedTaskType:t);
+    if(newClient)      nextClients  = [...nextClients, newClient];
+
+    const nextCt = [...latest.ct, assignment];
+
+    // Update all state at once
+    if(newGroup)        setGroups(nextGroups);
+    if(newTaskType||updatedTaskType) setTaskDefs(nextTaskDefs);
+    if(newClient)       setClients(nextClients);
+    setCt(nextCt);
+
+    // Update ref immediately so saveToSharePoint has fresh data
+    latestData.current = {...latestData.current, ct:nextCt, taskDefs:nextTaskDefs, clients:nextClients, groups:nextGroups};
+
+    // Single save with ALL updated data
+    saveToSharePoint(nextCt, nextGroups, nextTaskDefs, nextClients);
+  };
   const handleCreateGroup=label=>{
     const id='grp_'+uid();
     const g={id,label};
@@ -3725,6 +3770,7 @@ function WorkTrackApp(p){
     onCreateTaskType:handleCreateTaskType,
     onUpdateTaskType:handleUpdateTaskType,
     onAddAssignment:handleAddAssignment,
+    onAddTask:handleAddTask,
     onCreateGroup:handleCreateGroup,
     onAddClient:handleAddClient,
   }) : null,
