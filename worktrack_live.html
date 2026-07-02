@@ -286,6 +286,18 @@ function rowsToApp(sharedWb, privateWb, isReviewer){
     ref3: settings.RefLabel3||'Reference 3',
   };
 
+  // Sub-statuses from Settings sheet
+  const subStatuses = {
+    pending:  [],
+    approved: [],
+  };
+  Object.keys(settings).forEach(k=>{
+    const m = k.match(/^SubStatus_(pending|approved)_(\d+)$/);
+    if(m && settings[k]) subStatuses[m[1]].push(settings[k]);
+  });
+  if(!subStatuses.pending.length)  subStatuses.pending  = [...DEFAULT_SUB_STATUSES.pending];
+  if(!subStatuses.approved.length) subStatuses.approved = [...DEFAULT_SUB_STATUSES.approved];
+
   const parseAssignments = (wb, isPrivate) => {
     const rows = parseSheet(wb,'Assignments');
     const subs = parseSheet(wb,'SubTasks');
@@ -296,6 +308,7 @@ function rowsToApp(sharedWb, privateWb, isReviewer){
       filedDate:r.FiledDate||undefined, ackNo:r.AckNumber||undefined,
       fy:r.FY||undefined, ref1:r.Ref1||undefined, ref2:r.Ref2||undefined, ref3:r.Ref3||undefined,
       nextHearing:r.NextHearing||undefined, hearingNote:r.HearingNote||undefined,
+      subStatus:r.SubStatus||undefined,
       hearingLog: [], // loaded separately from HearingLog sheet
       closedWithoutReview:r.ClosedWithoutApproval==='true'||r.ClosedWithoutApproval===true,
       resignNote:r.ResignNote||undefined,
@@ -328,7 +341,7 @@ function rowsToApp(sharedWb, privateWb, isReviewer){
     r.ri = teamMap[r.rev]??0;
   });
 
-  return {clients, taskDefs, groups, people, settings, refLabels, ct: allAssignments};
+  return {clients, taskDefs, groups, people, settings, refLabels, subStatuses, ct: allAssignments};
 }
 
 function cleanAppData(data){
@@ -352,12 +365,13 @@ function cleanAppData(data){
 
 function appToRows(ct, taskDefs, isReviewer){
   const ASSIGN_COLS = ['ID','TaskTypeID','ClientID','Period','DueDate','Preparer','Reviewer',
-    'Status','Frequency','FiledDate','AckNumber','FY','Ref1','Ref2','Ref3','NextHearing','HearingNote','ClosedWithoutApproval','ResignNote'];
+    'Status','SubStatus','Frequency','FiledDate','AckNumber','FY','Ref1','Ref2','Ref3','NextHearing','HearingNote','ClosedWithoutApproval','ResignNote'];
   const SUB_COLS = ['ID','AssignmentID','Text','Done'];
 
   const toAssignRow = r => ({
     ID:r.id, TaskTypeID:r.tid, ClientID:r.cid||'', Period:r.period||'', DueDate:r.due,
-    Preparer:r.prep, Reviewer:r.rev, Status:r.status, Frequency:r.freq,
+    Preparer:r.prep, Reviewer:r.rev, Status:r.status, SubStatus:r.subStatus||'',
+    Frequency:r.freq,
     FiledDate:r.filedDate||'', AckNumber:r.ackNo||'', FY:r.fy||'',
     Ref1:r.ref1||'', Ref2:r.ref2||'', Ref3:r.ref3||'',
     NextHearing:r.nextHearing||'', HearingNote:r.hearingNote||'',
@@ -585,6 +599,12 @@ function App(){
 
       // Settings — LastSaved timestamp
       const now = new Date().toISOString();
+      const subStatusSettings = [];
+      ['pending','approved'].forEach(stage=>{
+        ((data.subStatuses||DEFAULT_SUB_STATUSES)[stage]||[]).forEach((v,i)=>{
+          subStatusSettings.push({Key:`SubStatus_${stage}_${i+1}`, Value:v});
+        });
+      });
       sheetToWorkbook(freshSWb,'Settings',[
         {Key:'RefLabel1',   Value:data.refLabels?.ref1||'Reference 1'},
         {Key:'RefLabel2',   Value:data.refLabels?.ref2||'Reference 2'},
@@ -593,6 +613,7 @@ function App(){
         {Key:'OrgName',     Value:CONFIG.orgName||''},
         {Key:'LastSaved',   Value:now},
         {Key:'LastSavedBy', Value:currentUser?.name||''},
+        ...subStatusSettings,
       ],['Key','Value']);
 
       // ── Step 5: Upload merged workbook ──
@@ -806,6 +827,13 @@ const TEAM = [{id:'RK',name:'Raj Kumar',idx:0},{id:'PK',name:'Priya K',idx:1},{i
 // CURRENT_USER is now passed in from auth layer via p.currentUser
 // Labels for the three custom reference fields shown only on Assessment-bucket tasks. Admin-editable.
 const DEFAULT_REF_LABELS = {ref1:'Notice No.', ref2:'AO Order Ref', ref3:'Hearing Ref'};
+
+// Sub-statuses per workflow stage — reviewer-controlled master list
+// These are defaults; actual values come from Settings sheet
+const DEFAULT_SUB_STATUSES = {
+  pending:  ['Not started','Email sent','Partial data received','Full data received','Work in progress'],
+  approved: ['Pending submission','Pending client approval'],
+};
 const FREQUENCIES = [{id:'none',label:'No recurrence'},{id:'monthly',label:'Monthly'},{id:'quarterly',label:'Quarterly'},{id:'yearly',label:'Yearly'}];
 
 const INIT_TASK_DEFS = [
@@ -978,29 +1006,44 @@ function daysUntilDue(due){
 }
 
 // Urgency bucket key for a days value
+// Urgency thresholds — each filter shows tasks AT OR BELOW this urgency level
+// i.e. selecting "Due in 10 days" shows everything due within 10 days (including overdue)
+const URGENCY_BUCKETS = [
+  {id:'over30',  label:'Overdue 30+ days',        color:'#7A1D05',  threshold:-31},
+  {id:'over10',  label:'Overdue 10+ days',         color:'#993C1D',  threshold:-11},
+  {id:'over2',   label:'Overdue 2+ days',          color:'#D85A30',  threshold:-2},
+  {id:'due01',   label:'Due within 1 day',         color:'#C97D00',  threshold:1},
+  {id:'due23',   label:'Due within 3 days',        color:'#8B6D00',  threshold:3},
+  {id:'due410',  label:'Due within 10 days',       color:'#0F6E56',  threshold:10},
+  {id:'due1130', label:'Due within 30 days',       color:'var(--color-text-secondary)', threshold:30},
+  {id:'due30p',  label:'Due in 30+ days (all)',    color:'var(--color-text-tertiary)',  threshold:99999},
+  {id:'nodate',  label:'No due date',              color:'var(--color-text-tertiary)',  threshold:null},
+];
+
+// Returns true if a task with `days` until due matches the selected urgency filter
+function matchesUrgencyFilter(days, filterId){
+  if(filterId==='all') return true;
+  const bucket = URGENCY_BUCKETS.find(u=>u.id===filterId);
+  if(!bucket) return true;
+  if(filterId==='nodate') return days===null;
+  if(days===null) return false; // tasks with no date don't match time-based filters
+  if(bucket.threshold===null) return false;
+  // Threshold: show tasks with days <= threshold (i.e. at or more urgent than this level)
+  return days <= bucket.threshold;
+}
+
+// Keep urgencyBucket for badge display purposes only (not filtering)
 function urgencyBucket(days){
   if(days===null) return 'nodate';
   if(days < -30)  return 'over30';
   if(days < -10)  return 'over10';
   if(days < -1)   return 'over2';
-  if(days <= 1)   return 'due01';   // overdue 0-1 or due today/tomorrow
+  if(days <= 1)   return 'due01';
   if(days <= 3)   return 'due23';
   if(days <= 10)  return 'due410';
   if(days <= 30)  return 'due1130';
   return 'due30p';
 }
-
-const URGENCY_BUCKETS = [
-  {id:'over30',  label:'Overdue 30+ days',   color:'#7A1D05'},
-  {id:'over10',  label:'Overdue 10-30 days', color:'#993C1D'},
-  {id:'over2',   label:'Overdue 2-9 days',   color:'#D85A30'},
-  {id:'due01',   label:'Due 0-1 days',        color:'#C97D00'},
-  {id:'due23',   label:'Due in 2-3 days',     color:'#8B6D00'},
-  {id:'due410',  label:'Due in 4-10 days',    color:'#0F6E56'},
-  {id:'due1130', label:'Due in 11-30 days',   color:'var(--color-text-secondary)'},
-  {id:'due30p',  label:'Due in 30+ days',     color:'var(--color-text-tertiary)'},
-  {id:'nodate',  label:'No due date',         color:'var(--color-text-tertiary)'},
-];
 
 // Returns the effective due date for urgency — earlier of due date and next hearing (for assessments)
 function effectiveDue(due, nextHearing){
@@ -1037,7 +1080,7 @@ function dueBadge(due, status, nextHearing){
   return null;
 }
 
-const BLANK_FILTER={fy:'all',quarter:'all',month:'all',status:'all',urgency:'all'};
+const BLANK_FILTER={fy:'all',quarter:'all',month:'all',status:'all',urgency:'all',subStatus:'all'};
 const MONTHS_LIST=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const QUARTERS=['Q1','Q2','Q3','Q4'];
 
@@ -1069,7 +1112,7 @@ function periodToFY(period){
 
 // ---------- Excel import/export ----------
 // Reference 1/2/3 columns are only meaningful for Assessment-bucket tasks; leave blank for other rows.
-const EXCEL_COLUMNS=['Client','Task Type *','Category','Bucket *','Compliance Filing','FY','Quarter','Month','Due Date *','Preparer','Reviewer','Status','Frequency','Filed Date','Ack Number','Ref FY','Reference 1','Reference 2','Reference 3','Next Hearing','Hearing Note','Closed Without Approval','Cancelled'];
+const EXCEL_COLUMNS=['Client','Task Type *','Category','Bucket *','Compliance Filing','FY','Quarter','Month','Due Date *','Preparer','Reviewer','Status','Frequency','Filed Date','Ack Number','Ref FY','Reference 1','Reference 2','Reference 3','Next Hearing','Hearing Note','Closed Without Approval','Cancelled','Subtasks'];
 
 // Format ISO date to dd/mm/yyyy for Excel display
 function fmtDate(iso){
@@ -1170,7 +1213,8 @@ function rowToExcelRecord(r, taskDefs, clients, groups, people){
     'Next Hearing': fmtDate(r.nextHearing),
     'Hearing Note': r.hearingNote||'',
     'Closed Without Approval': r.closedWithoutReview ? 'Yes' : '',
-    'Cancelled': r.status==='cancelled' ? 'Yes'+(r.resignNote?' — '+r.resignNote:'') : ''
+    'Cancelled': r.status==='cancelled' ? 'Yes'+(r.resignNote?' — '+r.resignNote:'') : '',
+    'Subtasks': (r.st||[]).map(s=>(s.d?'[x] ':'[ ] ')+s.t).join(' | ')
   };
 }
 
@@ -1294,7 +1338,7 @@ function buildTemplateWorkbook(people, clients, groups){
     ['Frequency','Optional','none / monthly / quarterly / yearly','Defaults to none if blank'],
     ['Filed Date','Optional','dd/mm/yyyy','Only for compliance tasks that have been filed'],
     ['Ack Number','Optional','Any text','Acknowledgement number after filing'],
-    ['Ref FY','Optional','NA / FY24-25 / FY25-26 etc — dropdown','Assessment financial year — only for assessment bucket. Different from the period FY above.'],
+    ['Subtasks','Optional','Step one | Step two | Step three','Pipe-separated list. Prefix with [x] to mark as done: "[x] Filed | [ ] Awaited ack"'],
     ['Reference 1','Optional','Any text','Notice No. or first custom reference'],
     ['Reference 2','Optional','Any text','AO Order Ref or second custom reference'],
     ['Reference 3','Optional','Any text','Hearing Ref or third custom reference'],
@@ -1376,6 +1420,10 @@ function parseExcelRows(sheetRows, people){
     const ref3=(row['Reference 3']||'').toString().trim();
     const nextHearing=parseDisplayDate((row['Next Hearing']||'').toString().trim());
     const hearingNote=(row['Hearing Note']||'').toString().trim();
+    const subtasksRaw=(row['Subtasks']||'').toString().trim();
+    const subtasks = subtasksRaw ? subtasksRaw.split('|').map(s=>s.trim()).filter(Boolean).map(s=>({
+      id:uid(), t:s.replace(/^\[.\]\s*/,'').trim(), d:s.startsWith('[x]')||s.startsWith('[X]')
+    })) : [];
 
     if(!taskLabel) errors.push('Task Type is required');
     if(!due) errors.push('Due Date is required');
@@ -1388,6 +1436,7 @@ function parseExcelRows(sheetRows, people){
       clientName, taskLabel, workCategory, bucket, isCompliance, period: period||null, due, prep, rev,
       status, freq, filedDate, ackNo, fy, ref1, ref2, ref3,
       nextHearing: nextHearing||undefined, hearingNote: hearingNote||undefined,
+      subtasks,
       errors
     });
   });
@@ -1428,6 +1477,7 @@ function MiniFilterBar(p){
   const f=p.filter||BLANK_FILTER;
   const upd=patch=>p.onChange({...f,...patch});
   const selStyle={fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'};
+  const allSubStatuses = p.allSubStatuses || [];
   return e('div',{style:{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
     e('select',{value:f.fy||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({fy:ev.target.value});},style:{...selStyle,maxWidth:90}},
       [e('option',{key:'all',value:'all'},'All FY'),...FY_OPTIONS.map(fy=>e('option',{key:fy,value:fy},fy))]
@@ -1442,6 +1492,11 @@ function MiniFilterBar(p){
       [e('option',{key:'all',value:'all'},'All due dates'),
        ...URGENCY_BUCKETS.map(u=>e('option',{key:u.id,value:u.id},u.label))]
     ),
+    allSubStatuses.length>0 ? e('select',{value:f.subStatus||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({subStatus:ev.target.value});},style:{...selStyle,maxWidth:140}},
+      [e('option',{key:'all',value:'all'},'All progress'),
+       e('option',{key:'none',value:'none'},'No progress set'),
+       ...allSubStatuses.map(s=>e('option',{key:s,value:s},s))]
+    ) : null,
     p.showStatus!==false ? STATUSES.map(s=>e('span',{key:s,onClick:ev=>{ev.stopPropagation();upd({status:s});},style:{fontSize:9,padding:'1px 7px',border:(f.status||'all')===s?'0.5px solid #AFA9EC':'0.5px solid var(--color-border-tertiary)',borderRadius:20,cursor:'pointer',color:(f.status||'all')===s?'#534AB7':'var(--color-text-secondary)',background:(f.status||'all')===s?'#EEEDFE':'transparent'}},s==='all'?'All':s[0].toUpperCase()+s.slice(1))) : null
   );
 }
@@ -2511,6 +2566,10 @@ function WorkTrackApp(p){
   const [showExcelModal,setShowExcelModal]=useState(false);
   const [closingPrompt,setClosingPrompt]=useState(null); // {rowId, closeType:'review'|'noReview'}
   const [refLabels,setRefLabels]=useState((p.initialData&&p.initialData.refLabels)||DEFAULT_REF_LABELS);
+  const [subStatuses,setSubStatuses]=useState((p.initialData&&p.initialData.subStatuses)||DEFAULT_SUB_STATUSES);
+  const wrapSubStatuses=(fn)=>(prev=>{const next=fn(prev);saveToSharePoint(null,null,null,null,null,next);return next;});
+  const addSubStatus=(stage,label)=>{ if(!label.trim()) return; setSubStatuses(wrapSubStatuses(prev=>({...prev,[stage]:[...prev[stage],label.trim()]}))); };
+  const removeSubStatus=(stage,label)=>setSubStatuses(wrapSubStatuses(prev=>({...prev,[stage]:prev[stage].filter(s=>s!==label)}))); 
   const [assessmentFYFilter,setAssessmentFYFilter]=useState('all');
   const [assessmentRefFilter,setAssessmentRefFilter]=useState({field:'all',query:''});
   const [assessmentHideDone,setAssessmentHideDone]=useState(true);
@@ -2530,9 +2589,9 @@ function WorkTrackApp(p){
     if(hasPerFilter) r=r.filter(x=>periodMatchesFilter(x.period, f));
     if((f.status||'all')!=='all') r=r.filter(x=>x.status===f.status);
     // Per-bucket urgency filter
-    if((f.urgency||'all')!=='all') r=r.filter(x=>urgencyBucket(effectiveDue(x.due, x.nextHearing))===f.urgency);
-    // Global due date filter — applied on top, overrides nothing but adds a cross-bucket constraint
-    if((globalDueFilter||'all')!=='all') r=r.filter(x=>urgencyBucket(effectiveDue(x.due, x.nextHearing))===globalDueFilter);
+    if((f.urgency||'all')!=='all') r=r.filter(x=>matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), f.urgency));
+    if((f.subStatus||'all')!=='all') r=r.filter(x=>(x.subStatus||'')===(f.subStatus==='none'?'':f.subStatus)||(!x.subStatus&&f.subStatus==='none'));
+    if((globalDueFilter||'all')!=='all') r=r.filter(x=>matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), globalDueFilter));
     return r;
   };
   const tStats = td => { const rows=filtForTask(ct.filter(x=>x.tid===td.id),td); return {total:rows.length,done:rows.filter(x=>x.status==='done').length,pending:rows.filter(x=>x.status==='pending').length,review:rows.filter(x=>x.status==='review').length,approved:rows.filter(x=>x.status==='approved').length}; };
@@ -2553,18 +2612,19 @@ function WorkTrackApp(p){
   // Auto-save: whenever ct/clients/taskDefs/groups change, notify parent
   // Keep a ref to the latest data so saveToSharePoint always has fresh values
   // (React closures can capture stale state when multiple setState calls happen in sequence)
-  const latestData = React.useRef({ct, groups, taskDefs, clients});
-  React.useEffect(()=>{ latestData.current = {ct, groups, taskDefs, clients}; }, [ct, groups, taskDefs, clients]);
+  const latestData = React.useRef({ct, groups, taskDefs, clients, subStatuses});
+  React.useEffect(()=>{ latestData.current = {ct, groups, taskDefs, clients, subStatuses}; }, [ct, groups, taskDefs, clients, subStatuses]);
 
-  const saveToSharePoint=(newCt, newGroups, newTaskDefs, newClients)=>{
+  const saveToSharePoint=(newCt, newGroups, newTaskDefs, newClients, newPeople, newSubStatuses)=>{
     if(p.onDataChange){
       const latest = latestData.current;
       p.onDataChange({
-        ct:        newCt       || latest.ct,
-        groups:    newGroups   || latest.groups,
-        taskDefs:  newTaskDefs || latest.taskDefs,
-        clients:   newClients  || latest.clients,
-        people:    p.initialData.people,
+        ct:          newCt          || latest.ct,
+        groups:      newGroups      || latest.groups,
+        taskDefs:    newTaskDefs    || latest.taskDefs,
+        clients:     newClients     || latest.clients,
+        people:      newPeople      || p.initialData.people,
+        subStatuses: newSubStatuses || latest.subStatuses,
         refLabels
       });
     }
@@ -2625,19 +2685,19 @@ function WorkTrackApp(p){
     }
 
     if(actorRole==='preparer'){
-      if(r.status==='pending'){ setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'review'}:x)); return; }
-      if(r.status==='approved'){ preparerMarkDone(rowId); return; } // preparer files after approval
-      if(r.status==='review'){ setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'pending'}:x)); return; } // undo submit
+      if(r.status==='pending'){ setCt(wrapCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'review',subStatus:undefined}:x))); return; }
+      if(r.status==='approved'){ preparerMarkDone(rowId); return; }
+      if(r.status==='review'){ setCt(wrapCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'pending',subStatus:'Work in progress'}:x))); return; }
       return;
     }
     if(actorRole==='reviewer'){
-      if(r.status==='review'){ setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'approved',resignNote:undefined}:x)); return; } // approve
-      if(r.status==='approved'){ setCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'review'}:x)); return; } // reviewer withdraws approval
+      if(r.status==='review'){ setCt(wrapCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'approved',resignNote:undefined,subStatus:'Pending submission'}:x))); return; }
+      if(r.status==='approved'){ setCt(wrapCt(prev=>prev.map(x=>x.id===rowId?{...x,status:'review',subStatus:undefined}:x))); return; }
       return;
     }
   };
 
-  const resignToPreparer=(rowId, note)=>setCt(wrapCt(prev=>prev.map(r=>r.id===rowId?{...r,status:'pending',resignNote:note||'Sent back by reviewer for changes.'}:r)));
+  const resignToPreparer=(rowId, note)=>setCt(wrapCt(prev=>prev.map(r=>r.id===rowId?{...r,status:'pending',subStatus:'Work in progress',resignNote:note||'Sent back by reviewer for changes.'}:r)));
   const cancelTask=(rowId, reason)=>setCt(wrapCt(prev=>prev.map(r=>r.id===rowId?{...r,status:'cancelled',resignNote:reason||undefined}:r)));
   const selfComplete=(rowId, details)=>setCt(wrapCt(prev=>prev.map(r=>r.id===rowId?{...r,
     status:'done', prep:CURRENT_USER, rev:CURRENT_USER,
@@ -2697,7 +2757,7 @@ function WorkTrackApp(p){
   };
   const toggleTaskCompliance=(tid)=>setTaskDefs(prev=>prev.map(t=>t.id===tid?{...t,isCompliance:!t.isCompliance}:t));
 
-  const goView=v=>{ syncCheck(); setView(v);setBucket(null);setExpTask(null);setExpCl(null);setExpCC(null);setExpNT(null);setFocusClient(null); };
+  const goView=v=>{ syncCheck(); setGlobalClientFilter(''); setView(v);setBucket(null);setExpTask(null);setExpCl(null);setExpCC(null);setExpNT(null);setFocusClient(null); };
   const goClient=cid=>{setFocusClient(cid);setView('clients');setExpCC(cid);setExpNT(null);};
 
   const handleCreateTaskType=newType=>setTaskDefs(wrapTaskDefs(prev=>[...prev,newType]));
@@ -2787,7 +2847,7 @@ function WorkTrackApp(p){
         filedDate:r.filedDate||undefined, ackNo:r.ackNo||undefined,
         fy:r.fy||undefined, ref1:r.ref1||undefined, ref2:r.ref2||undefined, ref3:r.ref3||undefined,
         nextHearing:r.nextHearing||undefined, hearingNote:r.hearingNote||undefined,
-        hearingLog:[], st:[]
+        hearingLog:[], st: r.subtasks||[]
       };
       if(mode==='replace'){
         const idx=nextCt.findIndex(x=>x.cid===cid && x.tid===tdef.id && x.period===r.period);
@@ -2807,6 +2867,65 @@ function WorkTrackApp(p){
     saveToSharePoint(nextCt, nextGroups, nextDefs, nextClients);
   };
 
+  const [globalClientFilter, setGlobalClientFilter] = useState(''); // client name search across all views
+  const [sortState, setSortState] = useState({}); // {[tidKey]: {col, dir}} — per task-type group
+
+  const getSort = (tidKey) => sortState[tidKey] || {col:'due', dir:'asc'};
+  const toggleSort = (tidKey, col) => setSortState(prev=>{
+    const cur = prev[tidKey] || {col:'due', dir:'asc'};
+    const dir = cur.col===col && cur.dir==='asc' ? 'desc' : 'asc';
+    return {...prev, [tidKey]:{col, dir}};
+  });
+
+  const sortRows = (rows, tidKey) => {
+    const {col, dir} = getSort(tidKey);
+    const mult = dir==='asc' ? 1 : -1;
+    return [...rows].sort((a,b)=>{
+      if(col==='client'){
+        const an=(clients.find(c=>c.id===a.cid)||{}).name||'';
+        const bn=(clients.find(c=>c.id===b.cid)||{}).name||'';
+        return mult*an.localeCompare(bn);
+      }
+      if(col==='due'){
+        const ad=daysUntilDue(a.due)??99999;
+        const bd=daysUntilDue(b.due)??99999;
+        return mult*(ad-bd);
+      }
+      if(col==='period'){
+        return mult*(a.period||'').localeCompare(b.period||'');
+      }
+      if(col==='status'){
+        const order={pending:0,review:1,approved:2,done:3,cancelled:4};
+        return mult*((order[a.status]||0)-(order[b.status]||0));
+      }
+      if(col==='substatus'){
+        return mult*(a.subStatus||'').localeCompare(b.subStatus||'');
+      }
+      return 0;
+    });
+  };
+
+  const applyClientFilter = (rows) => {
+    if(!globalClientFilter.trim()) return rows;
+    const q = globalClientFilter.toLowerCase();
+    return rows.filter(r=>{
+      const cname = (clients.find(c=>c.id===r.cid)||{}).name||'';
+      return cname.toLowerCase().includes(q) || (!r.cid && 'internal'.includes(q));
+    });
+  };
+
+  // Global client filter bar — shown in dashboard, team, and client views
+  const ClientFilterBar = ()=>e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:10,padding:'6px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},
+    e('i',{className:'ti ti-search',style:{fontSize:12,color:'var(--color-text-tertiary)'}}),
+    e('input',{
+      placeholder:'Filter by client name…',
+      value:globalClientFilter,
+      onChange:ev=>setGlobalClientFilter(ev.target.value),
+      style:{fontSize:11,border:'none',background:'transparent',outline:'none',flex:1,color:'var(--color-text-primary)'},
+    }),
+    globalClientFilter ? e('button',{onClick:()=>setGlobalClientFilter(''),style:{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'var(--color-text-tertiary)',padding:0}},'✕') : null
+  );
+
   const sbItem=(v,label)=>e('div',{key:v,onClick:()=>goView(v),style:{display:'flex',alignItems:'center',gap:7,padding:'6px 12px',fontSize:12,color:view===v?'#534AB7':'var(--color-text-secondary)',cursor:'pointer',borderLeft:view===v?'2px solid #534AB7':'2px solid transparent',fontWeight:view===v?500:400,background:view===v?'var(--color-background-primary)':'transparent'}},label);
 
   const BcPart=(label,onClick)=>onClick
@@ -2814,16 +2933,34 @@ function WorkTrackApp(p){
     : e('span',{key:label,style:{color:'var(--color-text-primary)',fontWeight:500,fontSize:12}},label);
 
   const ClientRows=(rows,tidKey,labelMode)=>{
-    labelMode = labelMode || 'client'; // 'client' = show client name (task-first view); 'task' = show task name (client-first view)
+    labelMode = labelMode || 'client';
+    const {col:sortCol, dir:sortDir} = getSort(tidKey);
+    const sorted = sortRows(applyClientFilter(rows), tidKey);
+
+    const SortHdr=(label,col,style={})=>{
+      const active=sortCol===col;
+      return e('div',{
+        onClick:ev=>{ev.stopPropagation();toggleSort(tidKey,col);},
+        style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:active?'#534AB7':'#534AB7',cursor:'pointer',display:'flex',alignItems:'center',gap:2,userSelect:'none',...style}
+      },label,e('span',{style:{fontSize:8,opacity:active?1:0.4}},active?(sortDir==='asc'?'↑':'↓'):'↕'));
+    };
+
+    if(sorted.length===0 && globalClientFilter){
+      return e('div',{style:{border:'0.5px solid #534AB7',borderTop:'none',borderBottomLeftRadius:'var(--border-radius-md)',borderBottomRightRadius:'var(--border-radius-md)',padding:'10px',textAlign:'center',fontSize:11,color:'var(--color-text-tertiary)'}},
+        'No clients match "'+globalClientFilter+'"');
+    }
+
     return e('div',{style:{border:'0.5px solid #534AB7',borderTop:'none',borderBottomLeftRadius:'var(--border-radius-md)',borderBottomRightRadius:'var(--border-radius-md)',marginBottom:3,background:'var(--color-background-primary)'}},
     e('div',{style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,padding:'4px 10px',borderBottom:'0.5px solid var(--color-border-tertiary)',background:'#EEEDFE'}},
-      e('div'),e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},labelMode==='task'?'Task':'Client'),
-      e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},'Period'),
-      e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},'Due'),
+      e('div'),
+      SortHdr(labelMode==='task'?'Task':'Client','client'),
+      SortHdr('Period','period'),
+      SortHdr('Due','due'),
       e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},'Team'),
-      e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},'Status'),e('div')
+      SortHdr('Status','status'),
+      e('div')
     ),
-    rows.map(r=>{
+    sorted.map(r=>{
       const cdef=clients.find(c=>c.id===r.cid);
       const tdef=taskDefs.find(t=>t.id===r.tid);
       const k=tidKey+'_'+r.id;
@@ -2862,7 +2999,23 @@ function WorkTrackApp(p){
             (()=>{const b=dueBadge(r.due,r.status,r.nextHearing);return b?e('span',{style:{fontSize:9,padding:'1px 5px',borderRadius:8,background:b.bg,color:b.color,fontWeight:500,whiteSpace:'nowrap'}},b.label):null;})()
           ),
           e('div',{style:{display:'flex',gap:2}},e(Av,{idx:r.pi,label:r.prep}),e(Av,{idx:r.ri,label:r.rev})),
-          e(St,{status:r.status}),
+          e('div',{style:{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
+            e(St,{status:r.status}),
+            // Sub-status chip + dropdown (only for pending and approved)
+            (r.status==='pending'||r.status==='approved') ? e('select',{
+              value: r.subStatus||'',
+              onClick: ev=>ev.stopPropagation(),
+              onChange: ev=>{ ev.stopPropagation(); setCt(wrapCt(prev=>prev.map(x=>x.id===r.id?{...x,subStatus:ev.target.value||undefined}:x))); },
+              style:{fontSize:9,padding:'2px 6px',borderRadius:12,border:'0.5px solid var(--color-border-secondary)',background:'var(--color-background-secondary)',color:'var(--color-text-secondary)',cursor:'pointer',maxWidth:140}
+            },
+              e('option',{value:''},'— progress —'),
+              ...(subStatuses[r.status]||[]).map(s=>e('option',{key:s,value:s},s)),
+              // If current subStatus is legacy (no longer in master list), show it greyed
+              r.subStatus && !(subStatuses[r.status]||[]).includes(r.subStatus)
+                ? e('option',{key:'_legacy',value:r.subStatus,style:{color:'#999'}},r.subStatus+' (legacy)')
+                : null
+            ) : r.subStatus ? e('span',{style:{fontSize:9,padding:'1px 6px',borderRadius:12,background:'#F0F0F0',color:'#666'}},r.subStatus) : null
+          ),
           e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},open?'▲':'▼')
         ),
         open?e('div',null,
@@ -3032,7 +3185,7 @@ function WorkTrackApp(p){
       e('div',{onClick:()=>setExpTask(open?null:td.id),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',marginBottom:3,cursor:'pointer',background:open?'#EEEDFE':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
         e('span',{style:{fontSize:11,color:'var(--color-text-tertiary)'}},open?'▲':'▼'),
         e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:'var(--color-text-primary)',minWidth:120}},td.label,hasOverride?e('span',{style:{fontSize:9,color:'#534AB7',marginLeft:6,fontWeight:400}},'(custom filter)'):null),
-        open?e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch)}):e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
+        open?e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch),allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]}):e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
           e(Pill,{k:'t'},st.total+' clients'),
           st.done>0?e(Pill,{k:'d'},st.done+' done'):null,
           st.review>0?e(Pill,{k:'r'},st.review+' review'):null,
@@ -3123,7 +3276,7 @@ function WorkTrackApp(p){
                 e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}},
                   e('span',{style:{fontSize:12,fontWeight:500,color:'var(--color-text-primary)'}},td.label),
                   hasOverride?e('span',{style:{fontSize:9,color:'#534AB7'}},'(custom filter)'):null,
-                  e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch)}),
+                  e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch),allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]}),
                   hasOverride?e('span',{onClick:()=>clearTaskOverride(td.id),style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',textDecoration:'underline'}},'reset'):null,
                   e('div',{style:{display:'flex',alignItems:'center',gap:4,marginLeft:'auto'}},
                     e('span',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},'Recurrence:'),
@@ -3147,14 +3300,16 @@ function WorkTrackApp(p){
     const myRows=myRowsAll.filter(x=>{
       if(!periodMatchesFilter(x.period, teamFilter)) return false;
       if((teamFilter.status||'all')!=='all' && x.status!==teamFilter.status) return false;
-      if((teamFilter.urgency||'all')!=='all' && urgencyBucket(effectiveDue(x.due, x.nextHearing))!==teamFilter.urgency) return false;
+      if((teamFilter.urgency||'all')!=='all' && !matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), teamFilter.urgency)) return false;
+      if((teamFilter.subStatus||'all')!=='all' && (x.subStatus||'')!==teamFilter.subStatus) return false;
       return true;
     });
     return e(React.Fragment,null,
-      e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:12,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap'}},
+      e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap'}},
         e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Filter:'),
-        e(MiniFilterBar,{filter:teamFilter,onChange:patch=>setTeamFilter(f=>({...f,...patch}))})
+        e(MiniFilterBar,{filter:teamFilter,onChange:patch=>setTeamFilter(f=>({...f,...patch})),allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]})
       ),
+      ClientFilterBar(),
       myRows.length===0 ? e('div',{style:{padding:24,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No tasks match this filter.') :
       e('div',null,[...new Set(myRows.map(x=>x.tid))].map(tid=>{
         const td=taskDefs.find(t=>t.id===tid);
@@ -3234,7 +3389,7 @@ function WorkTrackApp(p){
           e('div',null,'Client'),e('div',null,'Task'),e('div',null,'FY'),e('div',null,'Due'),
           e('div',null,refLabels.ref1),e('div',null,refLabels.ref2),e('div',null,refLabels.ref3),e('div',null,'Status')
         ),
-        rows.map(r=>{
+        sorted.map(r=>{
           const cdef=clients.find(c=>c.id===r.cid);
           const td=taskDefs.find(t=>t.id===r.tid);
           return e('div',{key:r.id,style:{display:'grid',gridTemplateColumns:'1fr 1fr 56px 70px 1fr 1fr 1fr 70px',gap:8,alignItems:'center',padding:'6px 10px',borderTop:'0.5px solid var(--color-border-tertiary)'}},
@@ -3438,6 +3593,7 @@ function WorkTrackApp(p){
           BcPart('Dashboard',()=>goView('dashboard')),
           focusClient?e(React.Fragment,{key:'f'},BcPart('Clients',()=>{setFocusClient(null);setExpCC(null);}),BcPart(cd?cd.name:'')):BcPart('Clients')
         ),
+        ClientFilterBar(),
         ClientsView()
       );
     }
@@ -3449,6 +3605,8 @@ function WorkTrackApp(p){
         e('div',{style:{display:'flex',alignItems:'center',gap:4,fontSize:12,marginBottom:8}},
           bucket?e(React.Fragment,{key:'b'},BcPart('Dashboard',()=>setBucket(null)),BcPart(bi.label)):BcPart('Dashboard')
         ),
+        // Client filter bar — shown when drilled into a bucket
+        bucket ? ClientFilterBar() : null,
         // Global due date filter — always visible on dashboard
         !bucket ? e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:10,padding:'8px 12px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},
           e('span',{style:{fontSize:10,fontWeight:500,color:'var(--color-text-secondary)',whiteSpace:'nowrap'}},'Due date filter:'),
@@ -3470,7 +3628,7 @@ function WorkTrackApp(p){
         ) : null,
         bucket?e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap',gap:8}},
           e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Default filter for all '+bi.label.toLowerCase()+' tasks (tasks can override below):'),
-          e(MiniFilterBar,{filter:bucketFilters[bucket],onChange:patch=>setBucketFilter(bucket,patch)})
+          e(MiniFilterBar,{filter:bucketFilters[bucket],onChange:patch=>setBucketFilter(bucket,patch),allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]})
         ):null,
         bucket&&s?e('div',{style:{display:'flex',gap:8,marginBottom:12}},
           ['Total','Pending','Done'].map((lbl,i)=>e('div',{key:lbl,style:{flex:1,background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',padding:'7px 10px'}},
@@ -3589,6 +3747,30 @@ function WorkTrackApp(p){
       e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Team'),
       ...TEAM.map(t=>sbItem(t.id, t.id===CURRENT_USER ? t.name+' (you)' : t.name)),
       e('div',{style:{padding:'8px 12px',borderTop:'0.5px solid var(--color-border-tertiary)',marginTop:'auto'}},
+        // Sub-status settings — reviewer only
+        p.currentUser?.isReviewer ? e('div',{style:{marginBottom:10}},
+          e('div',{style:{fontSize:9,fontWeight:600,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:6}},'Progress sub-statuses'),
+          ['pending','approved'].map(stage=>
+            e('div',{key:stage,style:{marginBottom:8}},
+              e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:4}},stage==='pending'?'While Pending:':'After Approval:'),
+              (subStatuses[stage]||[]).map(s=>
+                e('div',{key:s,style:{display:'flex',alignItems:'center',gap:4,marginBottom:2}},
+                  e('span',{style:{fontSize:9,flex:1,color:'var(--color-text-secondary)'}},s),
+                  e('button',{onClick:()=>removeSubStatus(stage,s),title:'Remove',style:{background:'none',border:'none',cursor:'pointer',fontSize:9,color:'#993C1D',padding:'0 2px'}},'✕')
+                )
+              ),
+              e('div',{style:{display:'flex',gap:4,marginTop:4}},
+                e('input',{
+                  id:'ss_input_'+stage,
+                  placeholder:'Add new…',
+                  style:{fontSize:9,padding:'2px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',flex:1,outline:'none'},
+                  onKeyDown:ev=>{if(ev.key==='Enter'){addSubStatus(stage,ev.target.value);ev.target.value='';}}
+                }),
+                e('button',{onClick:()=>{const inp=document.getElementById('ss_input_'+stage);if(inp){addSubStatus(stage,inp.value);inp.value='';}},style:{fontSize:9,padding:'2px 8px',border:'0.5px solid #534AB7',borderRadius:'var(--border-radius-md)',background:'#EEEDFE',color:'#534AB7',cursor:'pointer'}},'Add')
+              )
+            )
+          )
+        ) : null,
         e('div',{style:{display:'flex',alignItems:'center',gap:7}},
           e(Av,{idx:0,label:(p.currentUser?p.currentUser.name:'RK').slice(0,2).toUpperCase(),size:24}),
           e('div',{style:{flex:1}},
@@ -3610,14 +3792,10 @@ function WorkTrackApp(p){
     )
   )
   );
+  ReactDOM.createRoot(document.getElementById('wt-root')).render(e(App));
 }
 
-
-ReactDOM.createRoot(document.getElementById('wt-root')).render(e(App));
-}
-
-if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){boot();}
-else{let t=0;const iv=setInterval(()=>{t++;if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){clearInterval(iv);boot();}else if(t>100){clearInterval(iv);}},100);}
+if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){boot();}else{let t=0;const iv=setInterval(()=>{t++;if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){clearInterval(iv);boot();}else if(t>100){clearInterval(iv);}},100);}
 })();
 </script>
 </body>
