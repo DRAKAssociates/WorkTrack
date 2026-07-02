@@ -3792,8 +3792,9 @@ function WorkTrackApp(p){
     )
   )
   );
-  ReactDOM.createRoot(document.getElementById('wt-root')).render(e(App));
 }
+
+ReactDOM.createRoot(document.getElementById('wt-root')).render(e(App));
 }
 
 if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){boot();}else{let t=0;const iv=setInterval(()=>{t++;if(window.React&&window.ReactDOM&&window.XLSX&&window.msal){clearInterval(iv);boot();}else if(t>100){clearInterval(iv);}},100);}
