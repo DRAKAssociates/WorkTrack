@@ -12,13 +12,16 @@
 <style>
   :root{
     --color-background-primary:#ffffff;
-    --color-background-secondary:#F4F3EF;
-    --color-background-tertiary:#EDEBE4;
-    --color-text-primary:#1A1A18;
-    --color-text-secondary:#5F5E5A;
-    --color-text-tertiary:#8C8B86;
-    --color-border-tertiary:rgba(0,0,0,0.10);
-    --color-border-secondary:rgba(0,0,0,0.20);
+    --color-background-secondary:#F8F9FA;
+    --color-background-tertiary:#ECEEF1;
+    --color-text-primary:#1C2B3A;
+    --color-text-secondary:#4A5568;
+    --color-text-tertiary:#8898AA;
+    --color-border-tertiary:rgba(0,0,0,0.08);
+    --color-border-secondary:rgba(0,0,0,0.16);
+    --color-accent:#2D6BE4;
+    --color-accent-light:#EBF2FF;
+    --color-accent-dark:#1A4FAF;
     --border-radius-md:8px;
     --border-radius-lg:12px;
     --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
@@ -30,31 +33,31 @@
   /* Login screen */
   .login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:20px}
   .login-card{background:var(--color-background-primary);border-radius:var(--border-radius-lg);padding:40px 48px;text-align:center;box-shadow:0 2px 20px rgba(0,0,0,0.08);width:360px}
-  .login-logo{font-size:28px;font-weight:600;color:#534AB7;margin-bottom:4px}
+  .login-logo{font-size:28px;font-weight:600;color:var(--color-accent);margin-bottom:4px}
   .login-sub{font-size:13px;color:var(--color-text-tertiary);margin-bottom:28px}
-  .login-btn{width:100%;padding:11px;background:#534AB7;color:#fff;border:none;border-radius:var(--border-radius-md);font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
-  .login-btn:hover{background:#3C3489}
-  .login-btn.secondary{background:transparent;color:#534AB7;border:0.5px solid #534AB7}
-  .login-btn.secondary:hover{background:#EEEDFE}
+  .login-btn{width:100%;padding:11px;background:var(--color-accent);color:#fff;border:none;border-radius:var(--border-radius-md);font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+  .login-btn:hover{background:var(--color-accent-dark)}
+  .login-btn.secondary{background:transparent;color:var(--color-accent);border:0.5px solid var(--color-accent)}
+  .login-btn.secondary:hover{background:var(--color-accent-light)}
   .login-divider{font-size:11px;color:var(--color-text-tertiary);margin:8px 0}
 
   /* Preparer picker */
   .picker-list{display:flex;flex-direction:column;gap:8px;margin-top:16px}
   .picker-item{padding:10px 14px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);cursor:pointer;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--color-text-primary);background:var(--color-background-primary)}
-  .picker-item:hover{border-color:#534AB7;background:#EEEDFE;color:#534AB7}
+  .picker-item:hover{border-color:var(--color-accent);background:var(--color-accent-light);color:var(--color-accent)}
   .picker-avatar{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;color:#fff;flex-shrink:0}
 
   /* Loading */
   .loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:12px}
-  .spinner{width:32px;height:32px;border:3px solid #EEEDFE;border-top-color:#534AB7;border-radius:50%;animation:spin 0.8s linear infinite}
+  .spinner{width:32px;height:32px;border:3px solid var(--color-accent-light);border-top-color:var(--color-accent);border-radius:50%;animation:spin 0.8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   .loading-text{font-size:13px;color:var(--color-text-tertiary)}
 
   /* Save indicator */
-  .save-indicator{position:fixed;bottom:16px;right:16px;background:#534AB7;color:#fff;font-size:11px;padding:6px 12px;border-radius:20px;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:2000}
+  .save-indicator{position:fixed;bottom:16px;right:16px;background:#2B4D6F;color:#fff;font-size:11px;padding:6px 12px;border-radius:20px;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:2000}
   .save-indicator.visible{opacity:1}
-  .save-indicator.error{background:#993C1D}
-  .save-indicator.synced{background:#0F6E56}
+  .save-indicator.error{background:#C0392B}
+  .save-indicator.synced{background:#1A7A4A}
 
   /* App wrapper */
   .app-wrap{padding:16px;min-height:100vh}
@@ -97,7 +100,7 @@ const CONFIG = {
 };
 // ============================================================
 
-const AVC = ['#534AB7','#0F6E56','#993C1D','#185FA5','#854F0B'];
+const AVC = ['#2D6BE4','#0F6E56','#993C1D','#185FA5','#854F0B'];
 
 // ── MSAL Auth setup ──────────────────────────────────────────
 const msalConfig = {
@@ -773,7 +776,7 @@ function App(){
       e('div',{style:{fontSize:32,marginBottom:8}},'⚠️'),
       e('div',{style:{fontSize:14,color:'var(--color-text-primary)',marginBottom:4}},'Could not connect to SharePoint'),
       e('div',{style:{fontSize:12,color:'var(--color-text-tertiary)',marginBottom:16,textAlign:'center',maxWidth:300}},'Check that your Client ID and Tenant ID are correctly pasted in the CONFIG section at the top of this file, and that you have internet access.'),
-      e('button',{onClick:()=>setPhase('login'),style:{padding:'8px 16px',background:'#534AB7',color:'#fff',border:'none',borderRadius:'var(--border-radius-md)',cursor:'pointer',fontSize:13}},'Try again')
+      e('button',{onClick:()=>setPhase('login'),style:{padding:'8px 16px',background:'#2D6BE4',color:'#fff',border:'none',borderRadius:'var(--border-radius-md)',cursor:'pointer',fontSize:13}},'Try again')
     );
   }
 
@@ -809,7 +812,7 @@ function SaveIndicator(p){
 }
 
 
-const AVC = ['#534AB7','#0F6E56','#993C1D','#185FA5','#854F0B'];
+const AVC = ['#2D6BE4','#0F6E56','#993C1D','#185FA5','#854F0B'];
 const stLabel = s => ({pending:'Pending',review:'In review',approved:'Approved',done:'Done',cancelled:'Cancelled'}[s]||s);
 const initials = name => name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
 const uid = () => Math.random().toString(36).slice(2,9);
@@ -1457,21 +1460,21 @@ function parseExcelRows(sheetRows, people){
 
 function Av(p){return e('div',{style:{width:p.size||20,height:p.size||20,borderRadius:'50%',background:AVC[p.idx%5],fontSize:(p.size||20)*0.4,fontWeight:500,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}},p.label)}
 function Pill(p){const map={'t':{bg:'var(--color-background-secondary)',c:'var(--color-text-secondary)'},'d':{bg:'#EAF3DE',c:'#27500A'},'p':{bg:'#FAC775',c:'#412402'},'b':{bg:'#F7C1C1',c:'#501313'},'r':{bg:'#B5D4F4',c:'#042C53'}};const s=map[p.k];return e('span',{style:{fontSize:9,padding:'2px 7px',borderRadius:20,background:s.bg,color:s.c,whiteSpace:'nowrap'}},p.children)}
-function St(p){const map={pending:{bg:'#FAC775',c:'#412402'},review:{bg:'#B5D4F4',c:'#042C53'},approved:{bg:'#D4BFFF',c:'#2E0F6E'},done:{bg:'#C0DD97',c:'#173404'},cancelled:{bg:'#E8E8E8',c:'#555555'}};const s=map[p.status]||map.pending;return e('span',{style:{fontSize:9,padding:'2px 6px',borderRadius:20,background:s.bg,color:s.c,whiteSpace:'nowrap'}},stLabel(p.status))}
+function St(p){const map={pending:{bg:'#FEF3C7',c:'#78350F'},review:{bg:'#DBEAFE',c:'#1E3A5F'},approved:{bg:'#D1FAE5',c:'#064E3B'},done:{bg:'#A7F3D0',c:'#065F46'},cancelled:{bg:'#F3F4F6',c:'#6B7280'}};const s=map[p.status]||map.pending;return e('span',{style:{fontSize:9,padding:'2px 6px',borderRadius:20,background:s.bg,color:s.c,whiteSpace:'nowrap'}},stLabel(p.status))}
 function Chk(p){
   const st=p.state || (p.done?'done':'pending');
   const styleMap={
     pending:{border:'0.5px solid var(--color-border-secondary)',background:'transparent',content:'',textColor:'#042C53'},
     review:{border:'0.5px solid #185FA5',background:'#B5D4F4',content:'…',textColor:'#042C53'},
     approved:{border:'0.5px solid #2E0F6E',background:'#D4BFFF',content:'✓',textColor:'#2E0F6E'},
-    done:{border:'0.5px solid #534AB7',background:'#534AB7',content:'✓',textColor:'#fff'}
+    done:{border:'0.5px solid #2D6BE4',background:'#2D6BE4',content:'✓',textColor:'#fff'}
   };
   const s=styleMap[st]||styleMap.pending;
   const titles={pending:'Pending',review:'In review — click to act',approved:'Approved — preparer to file',done:'Done — click to reopen'};
   return e('div',{onClick:ev=>{ev.stopPropagation();p.onClick(ev)},title:titles[st]||st,style:{width:14,height:14,border:s.border,borderRadius:3,background:s.background,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,fontSize:9,color:s.textColor}},s.content);
 }
-function StChk(p){return e('div',{onClick:ev=>{ev.stopPropagation();p.onClick(ev)},style:{width:12,height:12,border:p.done?'0.5px solid #534AB7':'0.5px solid #AFA9EC',borderRadius:2,background:p.done?'#534AB7':'transparent',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,fontSize:8,color:'#fff'}},p.done?'✓':'')}
-function Btn(p){return e('button',{onClick:p.onClick,style:Object.assign({fontSize:11,padding:'5px 11px',border:p.pri?'0.5px solid #534AB7':'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:p.pri?'#534AB7':'transparent',color:p.pri?'#fff':'var(--color-text-secondary)',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:5},p.style||{})},p.children)}
+function StChk(p){return e('div',{onClick:ev=>{ev.stopPropagation();p.onClick(ev)},style:{width:12,height:12,border:p.done?'0.5px solid #2D6BE4':'0.5px solid #93B4F0',borderRadius:2,background:p.done?'#2D6BE4':'transparent',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,fontSize:8,color:'#fff'}},p.done?'✓':'')}
+function Btn(p){return e('button',{onClick:p.onClick,style:Object.assign({fontSize:11,padding:'5px 11px',border:p.pri?'0.5px solid #2D6BE4':'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:p.pri?'#2D6BE4':'transparent',color:p.pri?'#fff':'var(--color-text-secondary)',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:5},p.style||{})},p.children)}
 
 function periodOptions(includeAll){
   const monthly=PERIODS.filter(p=>/^[A-Za-z]{3} \d{4}$/.test(p));
@@ -1495,7 +1498,7 @@ function MiniFilterBar(p){
     color: dark ? '#fff' : 'var(--color-text-primary)'
   };
   const allSubStatuses = p.allSubStatuses || [];
-  const pillActive = {fontSize:9,padding:'1px 7px',borderRadius:20,cursor:'pointer',border:'0.5px solid '+(dark?'rgba(255,255,255,0.9)':'#AFA9EC'),color:dark?'#fff':'#534AB7',background:dark?'rgba(255,255,255,0.25)':'#EEEDFE',fontWeight:600};
+  const pillActive = {fontSize:9,padding:'1px 7px',borderRadius:20,cursor:'pointer',border:'0.5px solid '+(dark?'rgba(255,255,255,0.9)':'#93B4F0'),color:dark?'#fff':'#2D6BE4',background:dark?'rgba(255,255,255,0.25)':'#EBF2FF',fontWeight:600};
   const pillInactive = {fontSize:9,padding:'1px 7px',borderRadius:20,cursor:'pointer',border:'0.5px solid '+(dark?'rgba(255,255,255,0.3)':'var(--color-border-tertiary)'),color:dark?'rgba(255,255,255,0.7)':'var(--color-text-secondary)',background:'transparent'};
   return e('div',{style:{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
     e('select',{value:f.fy||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({fy:ev.target.value});},style:{...selStyle,maxWidth:90}},
@@ -1530,8 +1533,8 @@ function SubPanel(p){
     p.onAddSub(r.id,v);
     setDraft('');
   };
-  return e('div',{style:{background:'#F7F6FE',borderTop:'0.5px dashed #AFA9EC',padding:'7px 10px 7px 34px'}},
-    e('div',{style:{fontSize:9,fontWeight:500,color:'#534AB7',letterSpacing:'.04em',marginBottom:4,textTransform:'uppercase'}},'Steps / subtasks'),
+  return e('div',{style:{background:'#F0F5FF',borderTop:'0.5px dashed #93B4F0',padding:'7px 10px 7px 34px'}},
+    e('div',{style:{fontSize:9,fontWeight:500,color:'#2D6BE4',letterSpacing:'.04em',marginBottom:4,textTransform:'uppercase'}},'Steps / subtasks'),
     r.st.map(s=>e('div',{key:s.id,style:{display:'flex',alignItems:'center',gap:6,padding:'3px 0',fontSize:11,color:'var(--color-text-secondary)'}},
       e(StChk,{done:s.d,onClick:()=>p.onToggleSub(r.id,s.id)}),
       e('span',{style:s.d?{textDecoration:'line-through',opacity:.5}:{}},s.t)
@@ -1649,11 +1652,11 @@ function ExcelImportModal(p){
         e('div',{style:{marginBottom:14}},
           e('label',{style:labelStyle},'Import mode'),
           e('div',{style:{display:'flex',gap:6}},
-            e('div',{onClick:()=>setMode('append'),style:{flex:1,textAlign:'center',padding:'8px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='append'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='append'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='append'?500:400}},
+            e('div',{onClick:()=>setMode('append'),style:{flex:1,textAlign:'center',padding:'8px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='append'?'#EBF2FF':'var(--color-background-secondary)',color:mode==='append'?'#2D6BE4':'var(--color-text-secondary)',fontWeight:mode==='append'?500:400}},
               e('div',null,'Append'),
               e('div',{style:{fontSize:9,fontWeight:400,marginTop:2}},'Add as new rows, even if duplicates exist')
             ),
-            e('div',{onClick:()=>setMode('replace'),style:{flex:1,textAlign:'center',padding:'8px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='replace'?'#EEEDFE':'var(--color-background-secondary)',color:mode==='replace'?'#534AB7':'var(--color-text-secondary)',fontWeight:mode==='replace'?500:400}},
+            e('div',{onClick:()=>setMode('replace'),style:{flex:1,textAlign:'center',padding:'8px 0',fontSize:11,borderRadius:'var(--border-radius-md)',cursor:'pointer',background:mode==='replace'?'#EBF2FF':'var(--color-background-secondary)',color:mode==='replace'?'#2D6BE4':'var(--color-text-secondary)',fontWeight:mode==='replace'?500:400}},
               e('div',null,'Replace matching'),
               e('div',{style:{fontSize:9,fontWeight:400,marginTop:2}},'Update rows matching Client+Task+Period; leave the rest untouched')
             )
@@ -1661,7 +1664,7 @@ function ExcelImportModal(p){
         ),
 
         e('div',{style:{maxHeight:200,overflowY:'auto',border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',marginBottom:14}},
-          e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 70px 60px',gap:6,padding:'5px 8px',background:'#EEEDFE',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7',position:'sticky',top:0}},
+          e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 70px 60px',gap:6,padding:'5px 8px',background:'#EBF2FF',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#2D6BE4',position:'sticky',top:0}},
             e('div',null,'Client'),e('div',null,'Task'),e('div',null,'Period'),e('div',null,'Status')
           ),
           okRows.slice(0,50).map((r,i)=>e('div',{key:i,style:{display:'grid',gridTemplateColumns:'1fr 1fr 70px 60px',gap:6,padding:'5px 8px',borderTop:'0.5px solid var(--color-border-tertiary)',fontSize:11}},
@@ -1784,7 +1787,7 @@ function BulkCreateModal(p){
               MONTH_NAMES.map((m,i)=>e('option',{key:m,value:i},m)))
           )
         ),
-        e('div',{style:{fontSize:10,color:'#534AB7',background:'#F7F6FE',border:'0.5px solid #AFA9EC',borderRadius:'var(--border-radius-md)',padding:'7px 10px',marginBottom:16}},
+        e('div',{style:{fontSize:10,color:'#2D6BE4',background:'#F0F5FF',border:'0.5px solid #93B4F0',borderRadius:'var(--border-radius-md)',padding:'7px 10px',marginBottom:16}},
           '📅 Period: '+fyLabel+' · '+MONTH_NAMES[monthIdx]+' '+calYear,
           e('br'),
           monthIsQuarterEnd(monthIdx) ? '✓ Quarter end — Q tasks included' : '— Not a quarter end, only monthly tasks',
@@ -1883,7 +1886,7 @@ function ClosingPromptModal(p){
       ),
 
       isCompliance ? e(React.Fragment,null,
-        e('div',{style:{fontSize:11,fontWeight:500,color:'#534AB7',marginBottom:10,paddingBottom:6,borderBottom:'0.5px solid var(--color-border-tertiary)'}},'Filing details'),
+        e('div',{style:{fontSize:11,fontWeight:500,color:'#2D6BE4',marginBottom:10,paddingBottom:6,borderBottom:'0.5px solid var(--color-border-tertiary)'}},'Filing details'),
         e('div',{style:fieldWrap},e('label',{style:labelStyle},'Filed date'),
           e('input',{style:inputStyle,placeholder:'e.g. 20 Jun',value:filedDate,onChange:ev=>setFiledDate(ev.target.value)})
         ),
@@ -1893,7 +1896,7 @@ function ClosingPromptModal(p){
       ) : null,
 
       isAssessment ? e(React.Fragment,null,
-        e('div',{style:{fontSize:11,fontWeight:500,color:'#534AB7',marginBottom:10,paddingBottom:6,borderBottom:'0.5px solid var(--color-border-tertiary)',marginTop:isCompliance?12:0}},'Assessment details'),
+        e('div',{style:{fontSize:11,fontWeight:500,color:'#2D6BE4',marginBottom:10,paddingBottom:6,borderBottom:'0.5px solid var(--color-border-tertiary)',marginTop:isCompliance?12:0}},'Assessment details'),
         e('div',{style:fieldWrap},e('label',{style:labelStyle},'FY'),
           e('select',{style:inputStyle,value:fy,onChange:ev=>setFy(ev.target.value)},
             [e('option',{key:'',value:''},'— select FY —'),...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f))]
@@ -2149,9 +2152,9 @@ function EditTaskModal(p){
           [{val:'inherit',label:'Use default'},{val:'yes',label:'Yes — include in compliance tracker'},{val:'no',label:'No — exclude from compliance tracker'}].map(opt=>
             e('label',{key:opt.val,style:{fontSize:11,display:'flex',alignItems:'center',gap:4,cursor:'pointer',
               padding:'5px 10px',borderRadius:'var(--border-radius-md)',
-              background:compOverride===opt.val?'#EEEDFE':'transparent',
-              border:'0.5px solid '+(compOverride===opt.val?'#534AB7':'var(--color-border-secondary)'),
-              color:compOverride===opt.val?'#534AB7':'var(--color-text-secondary)'}},
+              background:compOverride===opt.val?'#EBF2FF':'transparent',
+              border:'0.5px solid '+(compOverride===opt.val?'#2D6BE4':'var(--color-border-secondary)'),
+              color:compOverride===opt.val?'#2D6BE4':'var(--color-text-secondary)'}},
               e('input',{type:'radio',name:'compOverride',value:opt.val,checked:compOverride===opt.val,onChange:()=>setCompOverride(opt.val),style:{margin:0}}),
               opt.label)
           )
@@ -2373,9 +2376,9 @@ function AddTaskModal(p){
       e('div',{style:{...wrap,position:'relative'}},
         e('label',{style:lbl},'Task type ', e('span',{style:{color:'var(--color-text-tertiary)',fontWeight:400}},'— select existing or type to create new')),
         selTaskDef
-          ? e('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'7px 10px',border:'0.5px solid #534AB7',borderRadius:'var(--border-radius-md)',background:'#F7F6FE'}},
-              e('span',{style:{flex:1,fontSize:12,color:'#534AB7',fontWeight:500}},selTaskDef.label),
-              e('span',{style:{fontSize:9,padding:'2px 6px',background:'#EEEDFE',color:'#534AB7',borderRadius:10}},selTaskDef.bucket),
+          ? e('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'7px 10px',border:'0.5px solid #2D6BE4',borderRadius:'var(--border-radius-md)',background:'#F0F5FF'}},
+              e('span',{style:{flex:1,fontSize:12,color:'#2D6BE4',fontWeight:500}},selTaskDef.label),
+              e('span',{style:{fontSize:9,padding:'2px 6px',background:'#EBF2FF',color:'#2D6BE4',borderRadius:10}},selTaskDef.bucket),
               e('button',{onClick:()=>{setTaskTypeId('');setTaskSearch('');setShowTaskDrop(true);},style:{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'var(--color-text-tertiary)',padding:0}},'change ✕')
             )
           : e('div',null,
@@ -2397,7 +2400,7 @@ function AddTaskModal(p){
                 )),
                 taskSearch.trim() && !filteredDefs.some(t=>t.label.toLowerCase()===taskSearch.trim().toLowerCase())
                   ? e('div',{onMouseDown:()=>{setNewTaskLabel(taskSearch.trim());setShowTaskDrop(false);},
-                      style:{padding:'8px 12px',fontSize:12,cursor:'pointer',color:'#534AB7',fontWeight:500,background:'#F7F6FE',display:'flex',alignItems:'center',gap:6}},
+                      style:{padding:'8px 12px',fontSize:12,cursor:'pointer',color:'#2D6BE4',fontWeight:500,background:'#F0F5FF',display:'flex',alignItems:'center',gap:6}},
                       e('i',{className:'ti ti-plus','aria-hidden':'true'}), 'Create "'+taskSearch.trim()+'" as new task type')
                   : null
               )
@@ -2406,8 +2409,8 @@ function AddTaskModal(p){
 
       // New task type fields — shown only when creating new
       isNewType && newTaskLabel ? e(React.Fragment,null,
-        e('div',{style:{background:'#F7F6FE',border:'0.5px solid #AFA9EC',borderRadius:'var(--border-radius-md)',padding:'10px 12px',marginBottom:14}},
-          e('div',{style:{fontSize:10,color:'#534AB7',fontWeight:600,marginBottom:10}},'New task type: '+newTaskLabel),
+        e('div',{style:{background:'#F0F5FF',border:'0.5px solid #93B4F0',borderRadius:'var(--border-radius-md)',padding:'10px 12px',marginBottom:14}},
+          e('div',{style:{fontSize:10,color:'#2D6BE4',fontWeight:600,marginBottom:10}},'New task type: '+newTaskLabel),
           // Category
           e('div',{style:{marginBottom:10}},
             e('label',{style:lbl},'Work category'),
@@ -2498,11 +2501,11 @@ function AddTaskModal(p){
                     e('div',{key:c.id,
                       onMouseDown:()=>{setClientId(c.id);setClientSearch(c.name);setShowClientDrop(false);},
                       style:{padding:'8px 12px',fontSize:12,cursor:'pointer',borderBottom:'0.5px solid var(--color-border-tertiary)',
-                        background:clientId===c.id?'#EEEDFE':'transparent',color:clientId===c.id?'#534AB7':'var(--color-text-primary)'}
+                        background:clientId===c.id?'#EBF2FF':'transparent',color:clientId===c.id?'#2D6BE4':'var(--color-text-primary)'}
                     },c.name)
                   ),
                   e('div',{onMouseDown:()=>setAddingClient(true),
-                    style:{padding:'8px 12px',fontSize:12,cursor:'pointer',color:'#534AB7',fontWeight:500,background:'#F7F6FE',display:'flex',alignItems:'center',gap:6}},
+                    style:{padding:'8px 12px',fontSize:12,cursor:'pointer',color:'#2D6BE4',fontWeight:500,background:'#F0F5FF',display:'flex',alignItems:'center',gap:6}},
                     e('i',{className:'ti ti-plus','aria-hidden':'true'}),'Add new client…')
                 )
               )
@@ -2568,12 +2571,12 @@ function AddTaskModal(p){
       ),
 
       // Private task toggle — reviewers only
-      p.isReviewer ? e('div',{style:{marginBottom:14,padding:'8px 12px',background:'#F7F6FE',border:'0.5px solid #AFA9EC',borderRadius:'var(--border-radius-md)'}},
-        e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#534AB7',fontWeight:500}},
+      p.isReviewer ? e('div',{style:{marginBottom:14,padding:'8px 12px',background:'#F0F5FF',border:'0.5px solid #93B4F0',borderRadius:'var(--border-radius-md)'}},
+        e('label',{style:{fontSize:11,display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#2D6BE4',fontWeight:500}},
           e('input',{type:'checkbox',checked:isPrivate,onChange:ev=>setIsPrivate(ev.target.checked),style:{margin:0}}),
           '🔒 Private task (only visible to reviewers)'
         ),
-        isPrivate ? e('div',{style:{fontSize:9,color:'#534AB7',marginTop:4,paddingLeft:18}},'Saved to private file. Preparers will not see this task.') : null
+        isPrivate ? e('div',{style:{fontSize:9,color:'#2D6BE4',marginTop:4,paddingLeft:18}},'Saved to private file. Preparers will not see this task.') : null
       ) : null,
 
       // Actions
@@ -2655,9 +2658,9 @@ function WorkTrackApp(p){
     const hasPerFilter=(f.fy||'all')!=='all'||(f.quarter||'all')!=='all'||(f.month||'all')!=='all';
     if(hasPerFilter) r=r.filter(x=>periodMatchesFilter(x.period, f));
     if((f.status||'all')!=='all') r=r.filter(x=>x.status===f.status);
-    if((f.urgency||'all')!=='all') r=r.filter(x=>matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), f.urgency));
+    if((f.urgency||'all')!=='all') r=r.filter(x=>!isClosedStatus(x.status) && matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), f.urgency));
     if((f.subStatus||'all')!=='all') r=r.filter(x=>(x.subStatus||'')===(f.subStatus==='none'?'':f.subStatus)||(!x.subStatus&&f.subStatus==='none'));
-    if((globalDueFilter||'all')!=='all') r=r.filter(x=>matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), globalDueFilter));
+    if((globalDueFilter||'all')!=='all') r=r.filter(x=>!isClosedStatus(x.status) && matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), globalDueFilter));
     if(myTasksOnly) r=r.filter(x=>x.prep===CURRENT_USER||x.rev===CURRENT_USER);
     return r;
   };
@@ -3033,7 +3036,7 @@ function WorkTrackApp(p){
     globalClientFilter ? e('button',{onClick:()=>setGlobalClientFilter(''),style:{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'var(--color-text-tertiary)',padding:0}},'✕') : null
   );
 
-  const sbItem=(v,label)=>e('div',{key:v,onClick:()=>goView(v),style:{display:'flex',alignItems:'center',gap:7,padding:'6px 12px',fontSize:12,color:view===v?'#534AB7':'var(--color-text-secondary)',cursor:'pointer',borderLeft:view===v?'2px solid #534AB7':'2px solid transparent',fontWeight:view===v?500:400,background:view===v?'var(--color-background-primary)':'transparent'}},label);
+  const sbItem=(v,label)=>e('div',{key:v,onClick:()=>goView(v),style:{display:'flex',alignItems:'center',gap:7,padding:'6px 12px',fontSize:12,color:view===v?'#2D6BE4':'var(--color-text-secondary)',cursor:'pointer',borderLeft:view===v?'2px solid #2D6BE4':'2px solid transparent',fontWeight:view===v?500:400,background:view===v?'var(--color-background-primary)':'transparent'}},label);
 
   const BcPart=(label,onClick)=>onClick
     ? e(React.Fragment,{key:label},e('span',{onClick,style:{color:'var(--color-text-tertiary)',cursor:'pointer',fontSize:12}},label),e('span',{style:{color:'var(--color-text-tertiary)',fontSize:10,margin:'0 4px'}},'›'))
@@ -3048,17 +3051,17 @@ function WorkTrackApp(p){
       const active=sortCol===col;
       return e('div',{
         onClick:ev=>{ev.stopPropagation();toggleSort(tidKey,col);},
-        style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:active?'#534AB7':'#534AB7',cursor:'pointer',display:'flex',alignItems:'center',gap:2,userSelect:'none',...style}
+        style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:active?'#2D6BE4':'#2D6BE4',cursor:'pointer',display:'flex',alignItems:'center',gap:2,userSelect:'none',...style}
       },label,e('span',{style:{fontSize:8,opacity:active?1:0.4}},active?(sortDir==='asc'?'↑':'↓'):'↕'));
     };
 
     if(sorted.length===0 && globalClientFilter){
-      return e('div',{style:{border:'0.5px solid #534AB7',borderTop:'none',borderBottomLeftRadius:'var(--border-radius-md)',borderBottomRightRadius:'var(--border-radius-md)',padding:'10px',textAlign:'center',fontSize:11,color:'var(--color-text-tertiary)'}},
+      return e('div',{style:{border:'0.5px solid #2D6BE4',borderTop:'none',borderBottomLeftRadius:'var(--border-radius-md)',borderBottomRightRadius:'var(--border-radius-md)',padding:'10px',textAlign:'center',fontSize:11,color:'var(--color-text-tertiary)'}},
         'No clients match "'+globalClientFilter+'"');
     }
 
-    return e('div',{style:{border:'0.5px solid #534AB7',borderTop:'none',borderBottomLeftRadius:'var(--border-radius-md)',borderBottomRightRadius:'var(--border-radius-md)',marginBottom:3,background:'var(--color-background-primary)'}},
-    e('div',{style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,padding:'5px 10px',borderBottom:'0.5px solid #3D3589',background:'#534AB7'}},
+    return e('div',{style:{border:'0.5px solid #2D6BE4',borderTop:'none',borderBottomLeftRadius:'var(--border-radius-md)',borderBottomRightRadius:'var(--border-radius-md)',marginBottom:3,background:'var(--color-background-primary)'}},
+    e('div',{style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,padding:'5px 10px',borderBottom:'0.5px solid #0D1E2E',background:'#1C2B3A'}},
       e('div'),
       SortHdr(labelMode==='task'?'Task':'Client','client',{color:'#fff'}),
       SortHdr('Period','period',{color:'#fff'}),
@@ -3074,9 +3077,9 @@ function WorkTrackApp(p){
       const open=expCl===k;
       const isDraftOpen=nextOccurDraft && nextOccurDraft.rowId===r.id;
       const samePerson = r.prep===r.rev;
-      const rowBg = open ? '#EEF0FF' : rowIdx%2===0 ? 'var(--color-background-primary)' : '#FAFAFE';
+      const rowBg = open ? '#E8F1FF' : rowIdx%2===0 ? 'var(--color-background-primary)' : '#FAFAFE';
       return e('div',{key:k},
-        e('div',{onClick:()=>setExpCl(open?null:k),style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,alignItems:'center',padding:'7px 10px',borderBottom:'0.5px solid var(--color-border-tertiary)',cursor:'pointer',borderLeft:open?'3px solid #534AB7':'3px solid transparent',background:rowBg,transition:'background 0.1s'}},
+        e('div',{onClick:()=>setExpCl(open?null:k),style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,alignItems:'center',padding:'7px 10px',borderBottom:'0.5px solid var(--color-border-tertiary)',cursor:'pointer',borderLeft:open?'3px solid #2D6BE4':'3px solid transparent',background:rowBg,transition:'background 0.1s'}},
           e(Chk,{state:r.status==='done'?'done':r.status==='review'?'review':r.status==='approved'?'approved':'pending',onClick:()=>{
             const isPreparer=r.prep===CURRENT_USER;
             const isReviewer=r.rev===CURRENT_USER;
@@ -3088,17 +3091,17 @@ function WorkTrackApp(p){
           labelMode==='task'
             ? e('div',{style:{fontSize:12,color:'var(--color-text-primary)',display:'flex',alignItems:'center',gap:4}},
                 e('span',null,tdef?tdef.label:r.tid),
-                r.isPrivate?e('span',{title:'Private task — only you can see this',style:{fontSize:9,marginLeft:4,padding:'1px 5px',background:'#EEEDFE',color:'#534AB7',borderRadius:10}},'🔒'):null,
+                r.isPrivate?e('span',{title:'Private task — only you can see this',style:{fontSize:9,marginLeft:4,padding:'1px 5px',background:'#EBF2FF',color:'#2D6BE4',borderRadius:10}},'🔒'):null,
                 r.closedWithoutReview?e('i',{className:'ti ti-shield-x',title:'Closed without review',style:{fontSize:10,color:'#D85A30'},'aria-label':'Closed without review'}):null
               )
             : e('div',{style:{fontSize:12,color:'var(--color-text-primary)',display:'flex',alignItems:'center',gap:4}},
-                r.cid ? e('span',{title:'Double-click to open client view',onDoubleClick:ev=>{ev.stopPropagation();goClient(r.cid);},onClick:ev=>ev.stopPropagation(),style:{color:'#534AB7',cursor:'pointer',borderBottom:'1px dashed #AFA9EC'}},cdef?cdef.name:r.cid)
+                r.cid ? e('span',{title:'Double-click to open client view',onDoubleClick:ev=>{ev.stopPropagation();goClient(r.cid);},onClick:ev=>ev.stopPropagation(),style:{color:'#2D6BE4',cursor:'pointer',borderBottom:'1px dashed #93B4F0'}},cdef?cdef.name:r.cid)
                   : e('span',{style:{color:'var(--color-text-tertiary)',fontStyle:'italic',fontSize:11}},'Internal task'),
                 r.closedWithoutReview?e('i',{className:'ti ti-shield-x',title:'Closed without review',style:{fontSize:10,color:'#D85A30'},'aria-label':'Closed without review'}):null
               ),
           e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},
             r.period||'—',
-            tdef&&tdef.bucket==='assessment'&&r.fy ? e('span',{style:{marginLeft:4,fontSize:9,padding:'1px 5px',borderRadius:10,background:'#EEEDFE',color:'#534AB7'}},r.fy) : null,
+            tdef&&tdef.bucket==='assessment'&&r.fy ? e('span',{style:{marginLeft:4,fontSize:9,padding:'1px 5px',borderRadius:10,background:'#EBF2FF',color:'#2D6BE4'}},r.fy) : null,
             tdef&&tdef.bucket==='assessment'&&r.nextHearing ? e('span',{style:{marginLeft:4,fontSize:9,padding:'1px 5px',borderRadius:10,background:'#FEF3CD',color:'#8B6D00'}},
               '📅 '+r.nextHearing) : null
           ),
@@ -3138,21 +3141,21 @@ function WorkTrackApp(p){
                 isReviewerUser && r.status!=='done' ? e(Btn,{onClick:()=>setCancelRow(r),style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-ban','aria-hidden':'true'}),'Cancel') : null
               );
             }
-            return e('div',{style:{padding:'10px 12px',background:'#fff',borderLeft:'3px solid #534AB7',borderBottom:'0.5px solid #D0CEFE',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+            return e('div',{style:{padding:'10px 12px',background:'#fff',borderLeft:'3px solid #2D6BE4',borderBottom:'0.5px solid #C3D8F9',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
               e('span',{style:{fontSize:10,color:'#666',fontStyle:'italic'}},'Preparer: '+(TEAM.find(t=>t.id===r.prep)?.name||r.prep)+' · Reviewer: '+(TEAM.find(t=>t.id===r.rev)?.name||r.rev)),
               // Progress sub-status dropdown
               (r.status==='pending'||r.status==='approved') ? e('select',{
                 value: r.subStatus||'',
                 onClick: ev=>ev.stopPropagation(),
                 onChange: ev=>{ ev.stopPropagation(); setCt(wrapCt(prev=>prev.map(x=>x.id===r.id?{...x,subStatus:ev.target.value||undefined}:x))); },
-                style:{fontSize:10,padding:'3px 8px',borderRadius:'var(--border-radius-md)',border:'0.5px solid #AFA9EC',background:'#F7F6FE',color:'#534AB7',cursor:'pointer'}
+                style:{fontSize:10,padding:'3px 8px',borderRadius:'var(--border-radius-md)',border:'0.5px solid #93B4F0',background:'#F0F5FF',color:'#2D6BE4',cursor:'pointer'}
               },
                 e('option',{value:''},'— progress —'),
                 ...(subStatuses[r.status]||[]).map(s=>e('option',{key:s,value:s},s)),
                 r.subStatus && !(subStatuses[r.status]||[]).includes(r.subStatus)
                   ? e('option',{key:'_legacy',value:r.subStatus,style:{color:'#999'}},r.subStatus+' (legacy)')
                   : null
-              ) : r.subStatus ? e('span',{style:{fontSize:9,padding:'2px 7px',borderRadius:10,background:'#E8E8FF',color:'#534AB7',border:'0.5px solid #AFA9EC'}},r.subStatus) : null,
+              ) : r.subStatus ? e('span',{style:{fontSize:9,padding:'2px 7px',borderRadius:10,background:'#E0ECFF',color:'#2D6BE4',border:'0.5px solid #93B4F0'}},r.subStatus) : null,
               // --- PREPARER ACTIONS ---
               isPreparer && r.status==='pending'
                 ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-arrow-right','aria-hidden':'true'}),'Submit for review') : null,
@@ -3197,9 +3200,9 @@ function WorkTrackApp(p){
           })(),
           r.resignNote ? e('div',{style:{padding:'6px 10px',fontSize:10,color:'#712B13',background:'#FAECE7',borderBottom:'0.5px solid #F0997B'}},e('i',{className:'ti ti-corner-up-left',style:{marginRight:4},'aria-hidden':'true'}),'Sent back to preparer: '+r.resignNote) : null,
           r.closedWithoutReview ? e('div',{style:{padding:'6px 10px',fontSize:10,color:'#712B13',background:'#FAECE7',borderBottom:'0.5px solid #F0997B'}},e('i',{className:'ti ti-shield-x',style:{marginRight:4},'aria-hidden':'true'}),'Closed without reviewer approval.') : null,
-          tdef && tdef.bucket==='assessment' ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderTop:'1px dashed #AFA9EC',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+          tdef && tdef.bucket==='assessment' ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderTop:'1px dashed #93B4F0',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
             e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}},
-              e('div',{style:{fontSize:9,fontWeight:500,color:'#534AB7',letterSpacing:'.04em',textTransform:'uppercase'}},'Assessment details'),
+              e('div',{style:{fontSize:9,fontWeight:500,color:'#2D6BE4',letterSpacing:'.04em',textTransform:'uppercase'}},'Assessment details'),
               r.status==='done'?e('span',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},'Read-only after closing — edit to update'):null
             ),
             e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,marginBottom:10}},
@@ -3223,8 +3226,8 @@ function WorkTrackApp(p){
               )
             ),
             // Next hearing section
-            e('div',{style:{borderTop:'0.5px solid #AFA9EC',paddingTop:8}},
-              e('div',{style:{fontSize:9,fontWeight:500,color:'#534AB7',marginBottom:6}},'Next hearing'),
+            e('div',{style:{borderTop:'0.5px solid #93B4F0',paddingTop:8}},
+              e('div',{style:{fontSize:9,fontWeight:500,color:'#2D6BE4',marginBottom:6}},'Next hearing'),
               e('div',{style:{display:'grid',gridTemplateColumns:'1fr 2fr auto',gap:8,alignItems:'end'}},
                 e('div',null,
                   e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:2}},'Date'),
@@ -3242,7 +3245,7 @@ function WorkTrackApp(p){
                   updateHearing(r.id, newDate, note);
                 }},'Save')
               ),
-              r.nextHearing ? e('div',{style:{marginTop:5,fontSize:9,color:'#534AB7'}},
+              r.nextHearing ? e('div',{style:{marginTop:5,fontSize:9,color:'#2D6BE4'}},
                 '📅 Current: '+r.nextHearing+(r.hearingNote?' — '+r.hearingNote:''),
                 r.hearingLog&&r.hearingLog.length>0
                   ? e('span',{style:{marginLeft:8,color:'var(--color-text-tertiary)'}},'('+r.hearingLog.length+' change'+(r.hearingLog.length>1?'s':'')+' logged — export to view)')
@@ -3250,8 +3253,8 @@ function WorkTrackApp(p){
               ) : e('div',{style:{marginTop:5,fontSize:9,color:'var(--color-text-tertiary)'}},'No hearing date set')
             )
           ) : null,
-          tdef && tdef.isCompliance ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderTop:'1px dashed #AFA9EC',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
-            e('div',{style:{fontSize:9,fontWeight:500,color:'#534AB7',letterSpacing:'.04em',textTransform:'uppercase',marginBottom:6}},'Filing record'),
+          tdef && tdef.isCompliance ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderTop:'1px dashed #93B4F0',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+            e('div',{style:{fontSize:9,fontWeight:500,color:'#2D6BE4',letterSpacing:'.04em',textTransform:'uppercase',marginBottom:6}},'Filing record'),
             e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}},
               e('div',null,
                 e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:2}},'Filed date'),
@@ -3266,7 +3269,7 @@ function WorkTrackApp(p){
               e('div',{style:{fontSize:9,color:'#993C1D',marginTop:5}},'Not yet filed — fill in date and ack number after submission.')
           ) : null,
           e(SubPanel,{r,onToggleSub:toggleSub,onAddSub:addSub}),
-          r.cid && r.freq && r.freq!=='none' ? e('div',{style:{padding:'8px 10px 8px 34px',borderTop:'0.5px dashed #AFA9EC',background:'#F7F6FE'}},
+          r.cid && r.freq && r.freq!=='none' ? e('div',{style:{padding:'8px 10px 8px 34px',borderTop:'0.5px dashed #93B4F0',background:'#F0F5FF'}},
             isDraftOpen ? e('div',{style:{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}},
               e('span',{style:{fontSize:10,color:'var(--color-text-secondary)'}},'New period:'),
               e('input',{value:nextOccurDraft.period,onChange:ev=>setNextOccurDraft(d=>({...d,period:ev.target.value})),style:{fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',width:90}}),
@@ -3296,17 +3299,17 @@ function WorkTrackApp(p){
     const f=getTaskFilter(td);
     const hasOverride=!!taskOverrides[td.id];
     return e('div',{key:td.id},
-      e('div',{onClick:()=>setExpTask(open?null:td.id),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderBottom: open ? 'none' : '0.5px solid var(--color-border-tertiary)',borderLeft:open?'3px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',marginBottom:open?0:3,cursor:'pointer',background:open?'#534AB7':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
+      e('div',{onClick:()=>setExpTask(open?null:td.id),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #1C2B3A':'0.5px solid var(--color-border-tertiary)',borderBottom: open ? 'none' : '0.5px solid var(--color-border-tertiary)',borderLeft:open?'3px solid #2D6BE4':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',marginBottom:open?0:3,cursor:'pointer',background:open?'#1C2B3A':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
         e('span',{style:{fontSize:11,color:open?'rgba(255,255,255,0.7)':'var(--color-text-tertiary)'}},open?'▲':'▼'),
-        e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:open?'#fff':'var(--color-text-primary)',minWidth:120}},td.label,hasOverride?e('span',{style:{fontSize:9,color:open?'#D0CEFE':'#534AB7',marginLeft:6,fontWeight:400}},'(custom filter)'):null),
+        e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:open?'#fff':'var(--color-text-primary)',minWidth:120}},td.label,hasOverride?e('span',{style:{fontSize:9,color:open?'#C3D8F9':'#2D6BE4',marginLeft:6,fontWeight:400}},'(custom filter)'):null),
         open?e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch),dark:true,allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]}):e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
           e(Pill,{k:'t'},st.total+' clients'),
           st.done>0?e(Pill,{k:'d'},st.done+' done'):null,
           st.review>0?e(Pill,{k:'r'},st.review+' review'):null,
           st.pending>0?e(Pill,{k:'p'},st.pending+' pending'):null
         ),
-        hasOverride?e('span',{onClick:ev=>{ev.stopPropagation();clearTaskOverride(td.id);},style:{fontSize:9,color:open?'#D0CEFE':'var(--color-text-tertiary)',cursor:'pointer',textDecoration:'underline',whiteSpace:'nowrap'}},'reset'):null,
-        e('button',{onClick:ev=>{ev.stopPropagation();setBulkCreateTask(td);},title:'Create '+td.label+' for all clients in one go',style:{fontSize:9,padding:'3px 8px',border:'0.5px solid '+(open?'rgba(255,255,255,0.4)':'#AFA9EC'),borderRadius:'var(--border-radius-md)',background:open?'rgba(255,255,255,0.15)':'#EEEDFE',color:open?'#fff':'#534AB7',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:3,whiteSpace:'nowrap'}},
+        hasOverride?e('span',{onClick:ev=>{ev.stopPropagation();clearTaskOverride(td.id);},style:{fontSize:9,color:open?'#C3D8F9':'var(--color-text-tertiary)',cursor:'pointer',textDecoration:'underline',whiteSpace:'nowrap'}},'reset'):null,
+        e('button',{onClick:ev=>{ev.stopPropagation();setBulkCreateTask(td);},title:'Create '+td.label+' for all clients in one go',style:{fontSize:9,padding:'3px 8px',border:'0.5px solid '+(open?'rgba(255,255,255,0.4)':'#93B4F0'),borderRadius:'var(--border-radius-md)',background:open?'rgba(255,255,255,0.15)':'#EBF2FF',color:open?'#fff':'#2D6BE4',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:3,whiteSpace:'nowrap'}},
           e('i',{className:'ti ti-stack-2','aria-hidden':'true'}),'Create for all clients'),
         e('div',{style:{fontSize:9,color:open?'rgba(255,255,255,0.7)':'var(--color-text-tertiary)',whiteSpace:'nowrap'}},pct+'%')
       ),
@@ -3389,7 +3392,7 @@ function WorkTrackApp(p){
               return e('div',{key:tid,style:{marginBottom:12}},
                 e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:5,flexWrap:'wrap'}},
                   e('span',{style:{fontSize:12,fontWeight:500,color:'var(--color-text-primary)'}},td.label),
-                  hasOverride?e('span',{style:{fontSize:9,color:'#534AB7'}},'(custom filter)'):null,
+                  hasOverride?e('span',{style:{fontSize:9,color:'#2D6BE4'}},'(custom filter)'):null,
                   e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch),allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]}),
                   hasOverride?e('span',{onClick:()=>clearTaskOverride(td.id),style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',textDecoration:'underline'}},'reset'):null,
                   e('div',{style:{display:'flex',alignItems:'center',gap:4,marginLeft:'auto'}},
@@ -3435,7 +3438,7 @@ function WorkTrackApp(p){
         const review=rowsForTask.filter(x=>x.status==='review').length;
         const pending=rowsForTask.filter(x=>x.status==='pending').length;
         return e('div',{key:tid,style:{marginBottom:6}},
-          e('div',{onClick:()=>setExpTask(open?null:sectionKey),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',cursor:'pointer',background:open?'#EEEDFE':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
+          e('div',{onClick:()=>setExpTask(open?null:sectionKey),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #2D6BE4':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',cursor:'pointer',background:open?'#EBF2FF':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
             e('span',{style:{fontSize:11,color:'var(--color-text-tertiary)'}},open?'▲':'▼'),
             e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:'var(--color-text-primary)',minWidth:120}},td.label),
             e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
@@ -3499,7 +3502,7 @@ function WorkTrackApp(p){
 
       rows.length===0 ? e('div',{style:{padding:24,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No assessment tasks match this filter.') :
       e('div',{style:{border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',overflow:'hidden'}},
-        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 56px 70px 1fr 1fr 1fr 70px',gap:8,padding:'6px 10px',background:'#EEEDFE',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},
+        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 56px 70px 1fr 1fr 1fr 70px',gap:8,padding:'6px 10px',background:'#EBF2FF',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#2D6BE4'}},
           e('div',null,'Client'),e('div',null,'Task'),e('div',null,'FY'),e('div',null,'Due'),
           e('div',null,refLabels.ref1),e('div',null,refLabels.ref2),e('div',null,refLabels.ref3),e('div',null,'Status')
         ),
@@ -3590,7 +3593,7 @@ function WorkTrackApp(p){
 
       rows.length===0 ? e('div',{style:{padding:24,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No compliance filings match this filter.') :
       e('div',{style:{border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-md)',overflow:'hidden'}},
-        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 110px 80px 70px 90px 130px 80px',gap:8,padding:'6px 10px',background:'#EEEDFE',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},
+        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 110px 80px 70px 90px 130px 80px',gap:8,padding:'6px 10px',background:'#EBF2FF',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#2D6BE4'}},
           e('div',null,'Client'),e('div',null,'Filing'),e('div',null,'Period'),e('div',null,'Due'),e('div',null,'Filed date'),e('div',null,'Ack. number'),e('div',null,'Status')
         ),
         rows.sort((a,b)=>(a.cid||'').localeCompare(b.cid||'')).map(r=>{
@@ -3615,7 +3618,7 @@ function WorkTrackApp(p){
       e('div',{style:{marginTop:14,paddingTop:12,borderTop:'0.5px solid var(--color-border-tertiary)'}},
         e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:6}},'Which task types count as a tracked compliance filing:'),
         e('div',{style:{display:'flex',gap:6,flexWrap:'wrap'}},
-          taskDefs.map(td=>e('label',{key:td.id,style:{fontSize:10,display:'flex',alignItems:'center',gap:4,padding:'3px 8px',border:'0.5px solid var(--color-border-tertiary)',borderRadius:20,cursor:'pointer',color:td.isCompliance?'#534AB7':'var(--color-text-secondary)',background:td.isCompliance?'#EEEDFE':'transparent'}},
+          taskDefs.map(td=>e('label',{key:td.id,style:{fontSize:10,display:'flex',alignItems:'center',gap:4,padding:'3px 8px',border:'0.5px solid var(--color-border-tertiary)',borderRadius:20,cursor:'pointer',color:td.isCompliance?'#2D6BE4':'var(--color-text-secondary)',background:td.isCompliance?'#EBF2FF':'transparent'}},
             e('input',{type:'checkbox',checked:!!td.isCompliance,onChange:()=>toggleTaskCompliance(td.id),style:{margin:0}}),
             td.label
           ))
@@ -3730,16 +3733,16 @@ function WorkTrackApp(p){
                 onClick:()=>setGlobalDueFilter(u.id),
                 style:{
                   fontSize:9,padding:'2px 8px',borderRadius:20,cursor:'pointer',whiteSpace:'nowrap',
-                  border: globalDueFilter===u.id ? '0.5px solid '+(u.color||'#534AB7') : '0.5px solid var(--color-border-tertiary)',
-                  background: globalDueFilter===u.id ? (u.id==='all'?'#EEEDFE':'#FAF9FF') : 'transparent',
-                  color: globalDueFilter===u.id ? (u.color||'#534AB7') : 'var(--color-text-tertiary)',
+                  border: globalDueFilter===u.id ? '0.5px solid '+(u.color||'#2D6BE4') : '0.5px solid var(--color-border-tertiary)',
+                  background: globalDueFilter===u.id ? (u.id==='all'?'#EBF2FF':'#FAF9FF') : 'transparent',
+                  color: globalDueFilter===u.id ? (u.color||'#2D6BE4') : 'var(--color-text-tertiary)',
                   fontWeight: globalDueFilter===u.id ? 600 : 400
                 }
               }, u.label)
             )
           ),
           globalDueFilter!=='all' ? e('span',{onClick:()=>setGlobalDueFilter('all'),style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',marginLeft:4}},'✕ Clear') : null,
-          e('label',{style:{display:'flex',alignItems:'center',gap:5,marginLeft:'auto',cursor:'pointer',fontSize:10,fontWeight:myTasksOnly?600:400,color:myTasksOnly?'#534AB7':'var(--color-text-secondary)',padding:'2px 8px',borderRadius:20,border:myTasksOnly?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',background:myTasksOnly?'#EEEDFE':'transparent',whiteSpace:'nowrap'}},
+          e('label',{style:{display:'flex',alignItems:'center',gap:5,marginLeft:'auto',cursor:'pointer',fontSize:10,fontWeight:myTasksOnly?600:400,color:myTasksOnly?'#2D6BE4':'var(--color-text-secondary)',padding:'2px 8px',borderRadius:20,border:myTasksOnly?'0.5px solid #2D6BE4':'0.5px solid var(--color-border-tertiary)',background:myTasksOnly?'#EBF2FF':'transparent',whiteSpace:'nowrap'}},
             e('input',{type:'checkbox',checked:myTasksOnly,onChange:ev=>setMyTasksOnly(ev.target.checked),style:{margin:0}}),
             'My tasks only')
         ) : null,
@@ -3854,9 +3857,9 @@ function WorkTrackApp(p){
   })() : null,
   e('div',{style:{display:'flex',height:680,border:'0.5px solid var(--color-border-tertiary)',borderRadius:'var(--border-radius-lg)',overflow:'hidden',background:'var(--color-background-primary)',fontFamily:'var(--font-sans)'}},
     e('div',{style:{width:180,minWidth:180,borderRight:'0.5px solid var(--color-border-tertiary)',background:'var(--color-background-secondary)',display:'flex',flexDirection:'column',overflowY:'auto'}},
-      e('div',{style:{padding:'10px 12px',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
-        e('div',{style:{fontSize:13,fontWeight:500,color:'var(--color-text-primary)'}},'WorkTrack'),
-        e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},CONFIG.orgName+' · '+CURRENT_USER)
+      e('div',{style:{padding:'10px 12px',borderBottom:'0.5px solid rgba(255,255,255,0.1)',background:'#1C2B3A'}},
+        e('div',{style:{fontSize:13,fontWeight:600,color:'#fff'}},'WorkTrack'),
+        e('div',{style:{fontSize:10,color:'rgba(255,255,255,0.6)'}},CONFIG.orgName+' · '+CURRENT_USER)
       ),
       e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Views'),
       sbItem('dashboard','Dashboard'),sbItem('clients','Clients'),sbItem('compliance','Compliance history'),sbItem('assessment','Assessment tracking'),
@@ -3890,7 +3893,7 @@ function WorkTrackApp(p){
                   style:{fontSize:9,padding:'2px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',flex:1,outline:'none'},
                   onKeyDown:ev=>{if(ev.key==='Enter'){addSubStatus(stage,ev.target.value);ev.target.value='';}}
                 }),
-                e('button',{onClick:()=>{const inp=document.getElementById('ss_input_'+stage);if(inp){addSubStatus(stage,inp.value);inp.value='';}},style:{fontSize:9,padding:'2px 8px',border:'0.5px solid #534AB7',borderRadius:'var(--border-radius-md)',background:'#EEEDFE',color:'#534AB7',cursor:'pointer'}},'Add')
+                e('button',{onClick:()=>{const inp=document.getElementById('ss_input_'+stage);if(inp){addSubStatus(stage,inp.value);inp.value='';}},style:{fontSize:9,padding:'2px 8px',border:'0.5px solid #2D6BE4',borderRadius:'var(--border-radius-md)',background:'#EBF2FF',color:'#2D6BE4',cursor:'pointer'}},'Add')
               )
             )
           )
@@ -3906,7 +3909,7 @@ function WorkTrackApp(p){
       )
     ),
     e('div',{style:{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}},
-      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'flex-end',padding:'8px 14px',borderBottom:'0.5px solid var(--color-border-tertiary)',flexShrink:0,gap:8,flexWrap:'wrap'}},
+      e('div',{style:{display:'flex',alignItems:'center',justifyContent:'flex-end',padding:'8px 14px',borderBottom:'0.5px solid var(--color-border-tertiary)',background:'var(--color-background-primary)',flexShrink:0,gap:8,flexWrap:'wrap'}},
         e(Btn,{onClick:()=>setShowExcelModal(true)},e('i',{className:'ti ti-file-spreadsheet','aria-hidden':'true'}),'Import Excel'),
         e(Btn,{onClick:handleExportVisible},e('i',{className:'ti ti-download','aria-hidden':'true'}),'Export visible'),
         e(Btn,{onClick:handleExportAll},e('i',{className:'ti ti-download','aria-hidden':'true'}),'Export all'),
