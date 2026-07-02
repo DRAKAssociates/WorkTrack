@@ -2231,6 +2231,8 @@ function AddTaskModal(p){
   const [noClient, setNoClient] = useState(false);
   const [addingClient, setAddingClient] = useState(false);
   const [clientDraft,  setClientDraft]  = useState('');
+  const [clientSearch, setClientSearch] = useState('');
+  const [showClientDrop, setShowClientDrop] = useState(false);
 
   // ── Period ──
   const [fy,    setFy]    = useState('');   // e.g. FY25-26
@@ -2284,12 +2286,17 @@ function AddTaskModal(p){
     if(!due){ setFormError('Due date is required.'); return; }
     if(!noClient && !clientId){ setFormError('Select or add a client, or tick "Internal task".'); return; }
 
-    // Auto-create task type if new
+    // Auto-create task type if new — reuse existing if same label already exists
     let tid = taskTypeId;
     if(isNewType){
-      tid = 'tt_'+uid();
-      const bucket = isAssessment ? 'assessment' : newBucket;
-      p.onCreateTaskType({id:tid, label:newTaskLabel.trim(), group:newGroup, bucket, isCompliance:(isCompliance||isAssessment)});
+      const existing = p.taskDefs.find(t=>t.label.toLowerCase()===newTaskLabel.trim().toLowerCase());
+      if(existing){
+        tid = existing.id;
+      } else {
+        tid = 'tt_'+uid();
+        const bucket = isAssessment ? 'assessment' : newBucket;
+        p.onCreateTaskType({id:tid, label:newTaskLabel.trim(), group:newGroup, bucket, isCompliance:(isCompliance||isAssessment)});
+      }
     }
 
     // If existing task type and compliance/assessment flags changed, update it
@@ -2300,6 +2307,7 @@ function AddTaskModal(p){
       }
     }
     const finalClientId = noClient ? null : clientId;
+    const finalPeriod = noPeriod ? null : buildPeriod();
     const pIdx = modalTeam.findIndex(t=>t.id===prep);
     const rIdx = modalTeam.findIndex(t=>t.id===rev);
     p.onAddAssignment({
@@ -2428,18 +2436,38 @@ function AddTaskModal(p){
         !noClient ? (
           addingClient
             ? e('div',{style:{display:'flex',gap:6}},
-                e('input',{style:inp,autoFocus:true,placeholder:'Client name…',value:clientDraft,
+                e('input',{style:inp,autoFocus:true,placeholder:'New client name…',value:clientDraft,
                   onChange:ev=>setClientDraft(ev.target.value),
-                  onKeyDown:ev=>{if(ev.key==='Enter'&&clientDraft.trim()){const c=p.onAddClient(clientDraft.trim(),'monthly');if(c){setClientId(c.id);setAddingClient(false);setClientDraft('');}}
+                  onKeyDown:ev=>{if(ev.key==='Enter'&&clientDraft.trim()){const c=p.onAddClient(clientDraft.trim(),'monthly');if(c){setClientId(c.id);setClientSearch(c.name);setAddingClient(false);setClientDraft('');}}
                     if(ev.key==='Escape'){setAddingClient(false);setClientDraft('');}}
                 }),
-                e(Btn,{onClick:()=>{if(clientDraft.trim()){const c=p.onAddClient(clientDraft.trim(),'monthly');if(c){setClientId(c.id);setAddingClient(false);setClientDraft('');}}}}, 'Add'),
+                e(Btn,{onClick:()=>{if(clientDraft.trim()){const c=p.onAddClient(clientDraft.trim(),'monthly');if(c){setClientId(c.id);setClientSearch(c.name);setAddingClient(false);setClientDraft('');}}}}, 'Add'),
                 e(Btn,{onClick:()=>{setAddingClient(false);setClientDraft('');}}, '✕')
               )
-            : e('select',{style:inp,value:clientId,onChange:ev=>{ if(ev.target.value==='__new__'){setAddingClient(true);}else{setClientId(ev.target.value);}}},
-                e('option',{key:'',value:'',disabled:true},'— select client —'),
-                ...p.clients.map(c=>e('option',{key:c.id,value:c.id},c.name)),
-                e('option',{key:'__new__',value:'__new__'},'+ Add new client…')
+            : e('div',{style:{position:'relative'}},
+                e('input',{style:{...inp,paddingRight:24},
+                  placeholder:'Search clients…',
+                  value: clientId ? (p.clients.find(c=>c.id===clientId)?.name||clientSearch) : clientSearch,
+                  autoComplete:'off',
+                  onFocus:()=>{setClientSearch('');setClientId('');setShowClientDrop(true);},
+                  onChange:ev=>{setClientSearch(ev.target.value);setClientId('');setShowClientDrop(true);},
+                  onBlur:()=>setTimeout(()=>setShowClientDrop(false),150)
+                }),
+                clientId ? e('span',{style:{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',fontSize:10,color:'var(--color-text-tertiary)',cursor:'pointer'},
+                  onMouseDown:()=>{setClientId('');setClientSearch('');setShowClientDrop(true);}
+                },'✕') : null,
+                showClientDrop && e('div',{style:{position:'absolute',top:'100%',left:0,right:0,background:'var(--color-background-primary)',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',boxShadow:'0 4px 16px rgba(0,0,0,0.12)',zIndex:100,maxHeight:200,overflowY:'auto',marginTop:2}},
+                  p.clients.filter(c=>c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(c=>
+                    e('div',{key:c.id,
+                      onMouseDown:()=>{setClientId(c.id);setClientSearch(c.name);setShowClientDrop(false);},
+                      style:{padding:'8px 12px',fontSize:12,cursor:'pointer',borderBottom:'0.5px solid var(--color-border-tertiary)',
+                        background:clientId===c.id?'#EEEDFE':'transparent',color:clientId===c.id?'#534AB7':'var(--color-text-primary)'}
+                    },c.name)
+                  ),
+                  e('div',{onMouseDown:()=>setAddingClient(true),
+                    style:{padding:'8px 12px',fontSize:12,cursor:'pointer',color:'#534AB7',fontWeight:500,background:'#F7F6FE',display:'flex',alignItems:'center',gap:6}},
+                    e('i',{className:'ti ti-plus','aria-hidden':'true'}),'Add new client…')
+                )
               )
         ) : null
       ),
@@ -2543,7 +2571,9 @@ function WorkTrackApp(p){
     BUCKETS.forEach(b=>init[b.id]={...BLANK_FILTER});
     return init;
   });
-  const [globalDueFilter, setGlobalDueFilter] = useState('all'); // urgency bucket id or 'all'
+  const [globalDueFilter, setGlobalDueFilter] = useState('all');
+  const [myTasksOnly, setMyTasksOnly] = useState(false); // toggle: show only my tasks
+  const [collapsedGroups, setCollapsedGroups] = useState({}); // {groupId: true} = collapsed
   const [taskOverrides,setTaskOverrides]=useState({});
   const [expTask,setExpTask]=useState(null);
   const [expCl,setExpCl]=useState(null);
@@ -2588,13 +2618,26 @@ function WorkTrackApp(p){
     const hasPerFilter=(f.fy||'all')!=='all'||(f.quarter||'all')!=='all'||(f.month||'all')!=='all';
     if(hasPerFilter) r=r.filter(x=>periodMatchesFilter(x.period, f));
     if((f.status||'all')!=='all') r=r.filter(x=>x.status===f.status);
-    // Per-bucket urgency filter
     if((f.urgency||'all')!=='all') r=r.filter(x=>matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), f.urgency));
     if((f.subStatus||'all')!=='all') r=r.filter(x=>(x.subStatus||'')===(f.subStatus==='none'?'':f.subStatus)||(!x.subStatus&&f.subStatus==='none'));
     if((globalDueFilter||'all')!=='all') r=r.filter(x=>matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), globalDueFilter));
+    if(myTasksOnly) r=r.filter(x=>x.prep===CURRENT_USER||x.rev===CURRENT_USER);
     return r;
   };
-  const tStats = td => { const rows=filtForTask(ct.filter(x=>x.tid===td.id),td); return {total:rows.length,done:rows.filter(x=>x.status==='done').length,pending:rows.filter(x=>x.status==='pending').length,review:rows.filter(x=>x.status==='review').length,approved:rows.filter(x=>x.status==='approved').length}; };
+  const isClosedStatus = s => s==='done'||s==='cancelled';
+  const tStats = td => {
+    const rows=filtForTask(ct.filter(x=>x.tid===td.id),td);
+    return {total:rows.length,done:rows.filter(x=>isClosedStatus(x.status)).length,pending:rows.filter(x=>x.status==='pending').length,review:rows.filter(x=>x.status==='review').length,approved:rows.filter(x=>x.status==='approved').length};
+  };
+  // Returns true if task type should be hidden (100% closed with no active filter)
+  const taskTypeIs100Done = td => {
+    const rows=ct.filter(x=>x.tid===td.id);
+    if(!rows.length) return false;
+    const f=getTaskFilter(td);
+    const hasAnyFilter=(f.status||'all')!=='all'||(f.fy||'all')!=='all'||(f.urgency||'all')!=='all'||(f.subStatus||'all')!=='all'||(globalDueFilter||'all')!=='all'||myTasksOnly;
+    if(hasAnyFilter) return false; // never auto-hide when filtering
+    return rows.every(x=>isClosedStatus(x.status));
+  };
   const bStats = bid => {
     const tds=taskDefs.filter(t=>t.bucket===bid);
     let total=0,done=0,pending=0;
@@ -3178,8 +3221,9 @@ function WorkTrackApp(p){
     const allRows=ct.filter(x=>x.tid===td.id);
     const filtered=filtForTask(allRows,td);
     if(!allRows.length) return null;
+    if(taskTypeIs100Done(td)) return null; // silently hide when 100% closed
     const open=expTask===td.id;
-    const st={total:filtered.length,done:filtered.filter(x=>x.status==='done').length,pending:filtered.filter(x=>x.status==='pending').length,review:filtered.filter(x=>x.status==='review').length};
+    const st={total:filtered.length,done:filtered.filter(x=>isClosedStatus(x.status)).length,pending:filtered.filter(x=>x.status==='pending').length,review:filtered.filter(x=>x.status==='review').length};
     const pct=st.total?Math.round(st.done/st.total*100):0;
     const f=getTaskFilter(td);
     const hasOverride=!!taskOverrides[td.id];
@@ -3610,7 +3654,7 @@ function WorkTrackApp(p){
         // Client filter bar — shown when drilled into a bucket
         bucket ? ClientFilterBar() : null,
         // Global due date filter — always visible on dashboard
-        !bucket ? e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:10,padding:'8px 12px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},
+        !bucket ? e('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:10,padding:'8px 12px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap'}},
           e('span',{style:{fontSize:10,fontWeight:500,color:'var(--color-text-secondary)',whiteSpace:'nowrap'}},'Due date filter:'),
           e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
             [{id:'all',label:'All'},...URGENCY_BUCKETS].map(u=>
@@ -3626,7 +3670,10 @@ function WorkTrackApp(p){
               }, u.label)
             )
           ),
-          globalDueFilter!=='all' ? e('span',{onClick:()=>setGlobalDueFilter('all'),style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',marginLeft:4}},'✕ Clear') : null
+          globalDueFilter!=='all' ? e('span',{onClick:()=>setGlobalDueFilter('all'),style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',marginLeft:4}},'✕ Clear') : null,
+          e('label',{style:{display:'flex',alignItems:'center',gap:5,marginLeft:'auto',cursor:'pointer',fontSize:10,fontWeight:myTasksOnly?600:400,color:myTasksOnly?'#534AB7':'var(--color-text-secondary)',padding:'2px 8px',borderRadius:20,border:myTasksOnly?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',background:myTasksOnly?'#EEEDFE':'transparent',whiteSpace:'nowrap'}},
+            e('input',{type:'checkbox',checked:myTasksOnly,onChange:ev=>setMyTasksOnly(ev.target.checked),style:{margin:0}}),
+            'My tasks only')
         ) : null,
         bucket?e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap',gap:8}},
           e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Default filter for all '+bi.label.toLowerCase()+' tasks (tasks can override below):'),
@@ -3744,10 +3791,16 @@ function WorkTrackApp(p){
       ),
       e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Views'),
       sbItem('dashboard','Dashboard'),sbItem('clients','Clients'),sbItem('compliance','Compliance history'),sbItem('assessment','Assessment tracking'),
-      e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Category'),
-      ...groups.map(g=>sbItem(g.id,g.label)),
-      e('div',{style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10}},'Team'),
-      ...TEAM.map(t=>sbItem(t.id, t.id===CURRENT_USER ? t.name+' (you)' : t.name)),
+      e('div',{
+        onClick:()=>setCollapsedGroups(prev=>({...prev,__cats__:!prev.__cats__})),
+        style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',userSelect:'none'}
+      },'Category',e('span',null,collapsedGroups.__cats__?'▶':'▼')),
+      !collapsedGroups.__cats__ ? groups.map(g=>sbItem(g.id,g.label)) : null,
+      e('div',{
+        onClick:()=>setCollapsedGroups(prev=>({...prev,__team__:!prev.__team__})),
+        style:{padding:'3px 10px',fontSize:10,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginTop:10,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',userSelect:'none'}
+      },'Team',e('span',null,collapsedGroups.__team__?'▶':'▼')),
+      !collapsedGroups.__team__ ? TEAM.map(t=>sbItem(t.id, t.id===CURRENT_USER ? t.name+' (you)' : t.name)) : null,
       e('div',{style:{padding:'8px 12px',borderTop:'0.5px solid var(--color-border-tertiary)',marginTop:'auto'}},
         // Sub-status settings — reviewer only
         p.currentUser?.isReviewer ? e('div',{style:{marginBottom:10}},
