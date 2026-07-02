@@ -3001,20 +3001,8 @@ function WorkTrackApp(p){
           e('div',{style:{display:'flex',gap:2}},e(Av,{idx:r.pi,label:r.prep}),e(Av,{idx:r.ri,label:r.rev})),
           e('div',{style:{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
             e(St,{status:r.status}),
-            // Sub-status chip + dropdown (only for pending and approved)
-            (r.status==='pending'||r.status==='approved') ? e('select',{
-              value: r.subStatus||'',
-              onClick: ev=>ev.stopPropagation(),
-              onChange: ev=>{ ev.stopPropagation(); setCt(wrapCt(prev=>prev.map(x=>x.id===r.id?{...x,subStatus:ev.target.value||undefined}:x))); },
-              style:{fontSize:9,padding:'2px 6px',borderRadius:12,border:'0.5px solid var(--color-border-secondary)',background:'var(--color-background-secondary)',color:'var(--color-text-secondary)',cursor:'pointer',maxWidth:140}
-            },
-              e('option',{value:''},'— progress —'),
-              ...(subStatuses[r.status]||[]).map(s=>e('option',{key:s,value:s},s)),
-              // If current subStatus is legacy (no longer in master list), show it greyed
-              r.subStatus && !(subStatuses[r.status]||[]).includes(r.subStatus)
-                ? e('option',{key:'_legacy',value:r.subStatus,style:{color:'#999'}},r.subStatus+' (legacy)')
-                : null
-            ) : r.subStatus ? e('span',{style:{fontSize:9,padding:'1px 6px',borderRadius:12,background:'#F0F0F0',color:'#666'}},r.subStatus) : null
+            // Show set sub-status as a small chip on the collapsed row (read-only indicator)
+            r.subStatus ? e('span',{style:{fontSize:9,padding:'1px 6px',borderRadius:12,background:'#F0F0F0',color:'#666',whiteSpace:'nowrap'}},r.subStatus) : null
           ),
           e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},open?'▲':'▼')
         ),
@@ -3043,6 +3031,19 @@ function WorkTrackApp(p){
             }
             return e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
               e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Preparer: '+(TEAM.find(t=>t.id===r.prep)?.name||r.prep)+' · Reviewer: '+(TEAM.find(t=>t.id===r.rev)?.name||r.rev)),
+              // Progress sub-status dropdown — shown in action bar for pending/approved
+              (r.status==='pending'||r.status==='approved') ? e('select',{
+                value: r.subStatus||'',
+                onClick: ev=>ev.stopPropagation(),
+                onChange: ev=>{ ev.stopPropagation(); setCt(wrapCt(prev=>prev.map(x=>x.id===r.id?{...x,subStatus:ev.target.value||undefined}:x))); },
+                style:{fontSize:10,padding:'3px 8px',borderRadius:'var(--border-radius-md)',border:'0.5px solid var(--color-border-secondary)',background:'var(--color-background-primary)',color:'var(--color-text-secondary)',cursor:'pointer'}
+              },
+                e('option',{value:''},'— progress —'),
+                ...(subStatuses[r.status]||[]).map(s=>e('option',{key:s,value:s},s)),
+                r.subStatus && !(subStatuses[r.status]||[]).includes(r.subStatus)
+                  ? e('option',{key:'_legacy',value:r.subStatus,style:{color:'#999'}},r.subStatus+' (legacy)')
+                  : null
+              ) : null,
               // --- PREPARER ACTIONS ---
               isPreparer && r.status==='pending'
                 ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-arrow-right','aria-hidden':'true'}),'Submit for review') : null,
