@@ -975,9 +975,20 @@ function periodMatchesFilter(period, f){
 }
 // Parse any due date string into a JS Date (best effort)
 function parseDueDate(due){
+  if(!due && due !== 0) return null;
+  // Excel serial number (number type from SheetJS)
+  if(typeof due === 'number'){
+    const d = new Date(Math.round((due - 25569) * 86400 * 1000));
+    return isNaN(d) ? null : d;
+  }
+  // Ensure string from here
+  due = String(due).trim();
   if(!due) return null;
   // ISO format: 2026-07-20
   if(/^\d{4}-\d{2}-\d{2}$/.test(due)) return new Date(due+'T00:00:00');
+  // dd/mm/yyyy
+  const dmy = due.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(dmy) return new Date(parseInt(dmy[3]), parseInt(dmy[2])-1, parseInt(dmy[1]));
   // "20 Jul 2026" or "20 Jul"
   const months={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
   const m1 = due.match(/^(\d{1,2})\s+([A-Za-z]{3})(?:\s+(\d{4}))?$/);
@@ -999,6 +1010,7 @@ function parseDueDate(due){
 
 // Returns days until due: negative = overdue, 0 = today, positive = future
 function daysUntilDue(due){
+  if(due === null || due === undefined || due === '') return null;
   const d = parseDueDate(due);
   if(!d) return null;
   const today = new Date(); today.setHours(0,0,0,0);
@@ -3039,24 +3051,25 @@ function WorkTrackApp(p){
     }
 
     return e('div',{style:{border:'0.5px solid #534AB7',borderTop:'none',borderBottomLeftRadius:'var(--border-radius-md)',borderBottomRightRadius:'var(--border-radius-md)',marginBottom:3,background:'var(--color-background-primary)'}},
-    e('div',{style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,padding:'4px 10px',borderBottom:'0.5px solid var(--color-border-tertiary)',background:'#EEEDFE'}},
+    e('div',{style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,padding:'5px 10px',borderBottom:'0.5px solid #3D3589',background:'#534AB7'}},
       e('div'),
-      SortHdr(labelMode==='task'?'Task':'Client','client'),
-      SortHdr('Period','period'),
-      SortHdr('Due','due'),
-      e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'#534AB7'}},'Team'),
-      SortHdr('Status','status'),
+      SortHdr(labelMode==='task'?'Task':'Client','client',{color:'#fff'}),
+      SortHdr('Period','period',{color:'#fff'}),
+      SortHdr('Due','due',{color:'#fff'}),
+      e('div',{style:{fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'rgba(255,255,255,0.8)'}},'Team'),
+      SortHdr('Status','status',{color:'#fff'}),
       e('div')
     ),
-    sorted.map(r=>{
+    sorted.map((r,rowIdx)=>{
       const cdef=clients.find(c=>c.id===r.cid);
       const tdef=taskDefs.find(t=>t.id===r.tid);
       const k=tidKey+'_'+r.id;
       const open=expCl===k;
       const isDraftOpen=nextOccurDraft && nextOccurDraft.rowId===r.id;
       const samePerson = r.prep===r.rev;
+      const rowBg = open ? '#EEF0FF' : rowIdx%2===0 ? 'var(--color-background-primary)' : '#FAFAFE';
       return e('div',{key:k},
-        e('div',{onClick:()=>setExpCl(open?null:k),style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,alignItems:'center',padding:'7px 10px',borderBottom:'0.5px solid var(--color-border-tertiary)',cursor:'pointer',background:open?'#F7F6FE':'var(--color-background-primary)'}},
+        e('div',{onClick:()=>setExpCl(open?null:k),style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,alignItems:'center',padding:'7px 10px',borderBottom:'0.5px solid var(--color-border-tertiary)',cursor:'pointer',borderLeft:open?'3px solid #534AB7':'3px solid transparent',background:rowBg,transition:'background 0.1s'}},
           e(Chk,{state:r.status==='done'?'done':r.status==='review'?'review':r.status==='approved'?'approved':'pending',onClick:()=>{
             const isPreparer=r.prep===CURRENT_USER;
             const isReviewer=r.rev===CURRENT_USER;
@@ -3118,21 +3131,21 @@ function WorkTrackApp(p){
                 isReviewerUser && r.status!=='done' ? e(Btn,{onClick:()=>setCancelRow(r),style:{borderColor:'#993C1D',color:'#993C1D'}},e('i',{className:'ti ti-ban','aria-hidden':'true'}),'Cancel') : null
               );
             }
-            return e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
-              e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Preparer: '+(TEAM.find(t=>t.id===r.prep)?.name||r.prep)+' · Reviewer: '+(TEAM.find(t=>t.id===r.rev)?.name||r.rev)),
-              // Progress sub-status dropdown — shown in action bar for pending/approved
+            return e('div',{style:{padding:'10px 12px',background:'#fff',borderLeft:'3px solid #534AB7',borderBottom:'0.5px solid #D0CEFE',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+              e('span',{style:{fontSize:10,color:'#666',fontStyle:'italic'}},'Preparer: '+(TEAM.find(t=>t.id===r.prep)?.name||r.prep)+' · Reviewer: '+(TEAM.find(t=>t.id===r.rev)?.name||r.rev)),
+              // Progress sub-status dropdown
               (r.status==='pending'||r.status==='approved') ? e('select',{
                 value: r.subStatus||'',
                 onClick: ev=>ev.stopPropagation(),
                 onChange: ev=>{ ev.stopPropagation(); setCt(wrapCt(prev=>prev.map(x=>x.id===r.id?{...x,subStatus:ev.target.value||undefined}:x))); },
-                style:{fontSize:10,padding:'3px 8px',borderRadius:'var(--border-radius-md)',border:'0.5px solid var(--color-border-secondary)',background:'var(--color-background-primary)',color:'var(--color-text-secondary)',cursor:'pointer'}
+                style:{fontSize:10,padding:'3px 8px',borderRadius:'var(--border-radius-md)',border:'0.5px solid #AFA9EC',background:'#F7F6FE',color:'#534AB7',cursor:'pointer'}
               },
                 e('option',{value:''},'— progress —'),
                 ...(subStatuses[r.status]||[]).map(s=>e('option',{key:s,value:s},s)),
                 r.subStatus && !(subStatuses[r.status]||[]).includes(r.subStatus)
                   ? e('option',{key:'_legacy',value:r.subStatus,style:{color:'#999'}},r.subStatus+' (legacy)')
                   : null
-              ) : null,
+              ) : r.subStatus ? e('span',{style:{fontSize:9,padding:'2px 7px',borderRadius:10,background:'#E8E8FF',color:'#534AB7',border:'0.5px solid #AFA9EC'}},r.subStatus) : null,
               // --- PREPARER ACTIONS ---
               isPreparer && r.status==='pending'
                 ? e(Btn,{pri:true,onClick:()=>advanceStatus(r.id,'preparer')},e('i',{className:'ti ti-arrow-right','aria-hidden':'true'}),'Submit for review') : null,
@@ -3273,19 +3286,19 @@ function WorkTrackApp(p){
     const f=getTaskFilter(td);
     const hasOverride=!!taskOverrides[td.id];
     return e('div',{key:td.id},
-      e('div',{onClick:()=>setExpTask(open?null:td.id),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',marginBottom:3,cursor:'pointer',background:open?'#EEEDFE':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
-        e('span',{style:{fontSize:11,color:'var(--color-text-tertiary)'}},open?'▲':'▼'),
-        e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:'var(--color-text-primary)',minWidth:120}},td.label,hasOverride?e('span',{style:{fontSize:9,color:'#534AB7',marginLeft:6,fontWeight:400}},'(custom filter)'):null),
+      e('div',{onClick:()=>setExpTask(open?null:td.id),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderBottom: open ? 'none' : '0.5px solid var(--color-border-tertiary)',borderLeft:open?'3px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',marginBottom:open?0:3,cursor:'pointer',background:open?'#534AB7':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
+        e('span',{style:{fontSize:11,color:open?'rgba(255,255,255,0.7)':'var(--color-text-tertiary)'}},open?'▲':'▼'),
+        e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:open?'#fff':'var(--color-text-primary)',minWidth:120}},td.label,hasOverride?e('span',{style:{fontSize:9,color:open?'#D0CEFE':'#534AB7',marginLeft:6,fontWeight:400}},'(custom filter)'):null),
         open?e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch),allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]}):e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
           e(Pill,{k:'t'},st.total+' clients'),
           st.done>0?e(Pill,{k:'d'},st.done+' done'):null,
           st.review>0?e(Pill,{k:'r'},st.review+' review'):null,
           st.pending>0?e(Pill,{k:'p'},st.pending+' pending'):null
         ),
-        hasOverride?e('span',{onClick:ev=>{ev.stopPropagation();clearTaskOverride(td.id);},style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',textDecoration:'underline',whiteSpace:'nowrap'}},'reset'):null,
-        e('button',{onClick:ev=>{ev.stopPropagation();setBulkCreateTask(td);},title:'Create '+td.label+' for all clients in one go',style:{fontSize:9,padding:'3px 8px',border:'0.5px solid #AFA9EC',borderRadius:'var(--border-radius-md)',background:'#EEEDFE',color:'#534AB7',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:3,whiteSpace:'nowrap'}},
+        hasOverride?e('span',{onClick:ev=>{ev.stopPropagation();clearTaskOverride(td.id);},style:{fontSize:9,color:open?'#D0CEFE':'var(--color-text-tertiary)',cursor:'pointer',textDecoration:'underline',whiteSpace:'nowrap'}},'reset'):null,
+        e('button',{onClick:ev=>{ev.stopPropagation();setBulkCreateTask(td);},title:'Create '+td.label+' for all clients in one go',style:{fontSize:9,padding:'3px 8px',border:'0.5px solid '+(open?'rgba(255,255,255,0.4)':'#AFA9EC'),borderRadius:'var(--border-radius-md)',background:open?'rgba(255,255,255,0.15)':'#EEEDFE',color:open?'#fff':'#534AB7',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:3,whiteSpace:'nowrap'}},
           e('i',{className:'ti ti-stack-2','aria-hidden':'true'}),'Create for all clients'),
-        e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',whiteSpace:'nowrap'}},pct+'%')
+        e('div',{style:{fontSize:9,color:open?'rgba(255,255,255,0.7)':'var(--color-text-tertiary)',whiteSpace:'nowrap'}},pct+'%')
       ),
       open?ClientRows(filtered,td.id):null
     );
