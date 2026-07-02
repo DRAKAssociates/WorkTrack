@@ -514,58 +514,113 @@ function App(){
     setPhase('app');
   };
 
-  // Core save logic — shared by debounced and immediate paths
+  // Core save logic — ALWAYS fetches fresh copy from SharePoint first, merges, then writes back
+  // This prevents any user from overwriting another user's concurrent changes
   const doSave = async (newCt, newAppData) => {
     setSaveState('saving');
     try{
       const data = newAppData || appData;
-      const {sharedAssignRows, sharedSubRows, privateAssignRows, privateSubRows, ASSIGN_COLS, SUB_COLS} = appToRows(newCt||data.ct, data.taskDefs, currentUser?.isReviewer);
+      const ct = newCt || data.ct;
 
-      // Write shared workbook
-      const sWb = sharedWb || XLSX.read('',{type:'string'});
-      sheetToWorkbook(sWb,'Assignments',sharedAssignRows,ASSIGN_COLS);
-      sheetToWorkbook(sWb,'SubTasks',sharedSubRows,SUB_COLS);
+      // ── Step 1: Fetch the CURRENT version from SharePoint ──
+      const freshSWb = await downloadExcel(sharedFileRef.driveId, sharedFileRef.itemId, null);
 
-      // Write clients, taskTypes, groups, people back too
-      sheetToWorkbook(sWb,'Clients',data.clients.map(c=>({ID:c.id,Name:c.name,DefaultFreq:c.defaultFreq})),['ID','Name','DefaultFreq']);
-      sheetToWorkbook(sWb,'TaskTypes',data.taskDefs.map(t=>({ID:t.id,Label:t.label,Group:t.group||'',Bucket:t.bucket,IsCompliance:t.isCompliance?'true':'false'})),['ID','Label','Group','Bucket','IsCompliance']);
-      sheetToWorkbook(sWb,'Groups',data.groups.map(g=>({ID:g.id,Label:g.label})),['ID','Label']);
-      // HearingLog — append-only audit trail, always written in full
-      const allHearingLogs = (newCt||data.ct||[]).flatMap(r=>(r.hearingLog||[]).map(h=>({AssignmentID:r.id,...h})));
-      sheetToWorkbook(sWb,'HearingLog',allHearingLogs,['AssignmentID','PrevDate','NewDate','Note','ChangedOn','ChangedBy']);
-      // Shared People — ID + Name only, nothing sensitive
-      sheetToWorkbook(sWb,'People',
-        data.people.map(p=>({ID:p.id, Name:p.name})),
-        ['ID','Name']);
-      // Private People — full details (email, role, accountType) — always written by reviewer
+      // ── Step 2: Merge assignments — apply our in-memory rows onto the fresh file ──
+      // Parse fresh assignments from SharePoint
+      const freshSharedAssign = parseSheet(freshSWb,'Assignments');
+      const freshSubTasks     = parseSheet(freshSWb,'SubTasks');
+
+      // Build lookup of our in-memory rows by ID
+      const {sharedAssignRows, sharedSubRows, privateAssignRows, privateSubRows, ASSIGN_COLS, SUB_COLS} =
+        appToRows(ct, data.taskDefs, currentUser?.isReviewer);
+
+      const ourRowIds = new Set(sharedAssignRows.map(r=>r.ID));
+      const ourSubIds = new Set(sharedSubRows.map(r=>r.AssignmentID));
+
+      // Merged assignments: keep fresh rows we didn't touch, replace/add our rows
+      const mergedAssign = [
+        ...freshSharedAssign.filter(r=>!ourRowIds.has(r.ID)), // others' rows untouched
+        ...sharedAssignRows                                     // our rows (updated or new)
+      ];
+      const mergedSubs = [
+        ...freshSubTasks.filter(r=>!ourSubIds.has(r.AssignmentID)), // others' subtasks untouched
+        ...sharedSubRows                                              // our subtasks
+      ];
+
+      // ── Step 3: Merge masters (clients, taskDefs, groups) — union, ours wins on conflict ──
+      const freshClients  = parseSheet(freshSWb,'Clients');
+      const freshTaskDefs = parseSheet(freshSWb,'TaskTypes');
+      const freshGroups   = parseSheet(freshSWb,'Groups');
+
+      const mergeById = (fresh, ours, idField) => {
+        const ourMap = new Map(ours.map(r=>[r[idField], r]));
+        const freshFiltered = fresh.filter(r=>!ourMap.has(r[idField]));
+        return [...freshFiltered, ...ours];
+      };
+
+      const mergedClients  = mergeById(freshClients,  data.clients.map(c=>({ID:c.id,Name:c.name,DefaultFreq:c.defaultFreq})), 'ID');
+      const mergedTaskDefs = mergeById(freshTaskDefs, data.taskDefs.map(t=>({ID:t.id,Label:t.label,Group:t.group||'',Bucket:t.bucket,IsCompliance:t.isCompliance?'true':'false'})), 'ID');
+      const mergedGroups   = mergeById(freshGroups,   data.groups.map(g=>({ID:g.id,Label:g.label})), 'ID');
+
+      // ── Step 4: Write all sheets to the fresh workbook ──
+      sheetToWorkbook(freshSWb,'Assignments', mergedAssign, ASSIGN_COLS);
+      sheetToWorkbook(freshSWb,'SubTasks',    mergedSubs,   SUB_COLS);
+      sheetToWorkbook(freshSWb,'Clients',     mergedClients,  ['ID','Name','DefaultFreq']);
+      sheetToWorkbook(freshSWb,'TaskTypes',   mergedTaskDefs, ['ID','Label','Group','Bucket','IsCompliance']);
+      sheetToWorkbook(freshSWb,'Groups',      mergedGroups,   ['ID','Label']);
+      sheetToWorkbook(freshSWb,'People',      data.people.map(p=>({ID:p.id,Name:p.name})), ['ID','Name']);
+
+      // HearingLog — merge append-only logs
+      const freshLogs    = parseSheet(freshSWb,'HearingLog');
+      const ourLogIds    = new Set(ct.flatMap(r=>(r.hearingLog||[]).map(h=>r.id+'_'+h.changedOn)));
+      const ourLogs      = ct.flatMap(r=>(r.hearingLog||[]).map(h=>({AssignmentID:r.id,...h})));
+      const mergedLogs   = [...freshLogs.filter(h=>!ourLogIds.has(h.AssignmentID+'_'+h.ChangedOn)), ...ourLogs];
+      sheetToWorkbook(freshSWb,'HearingLog', mergedLogs, ['AssignmentID','PrevDate','NewDate','Note','ChangedOn','ChangedBy']);
+
       if(currentUser?.isReviewer && privateWb){
-        sheetToWorkbook(privateWb,'People',
-          data.people.map(p=>({ID:p.id, Name:p.name, Email:p.email||'', Role:p.role||'preparer', AccountType:p.accountType||'shared'})),
+        sheetToWorkbook(freshSWb,'People',
+          data.people.map(p=>({ID:p.id,Name:p.name,Email:p.email||'',Role:p.role||'preparer',AccountType:p.accountType||'shared'})),
           ['ID','Name','Email','Role','AccountType']);
       }
 
-      // Write Settings including LastSaved timestamp so other clients detect the change
+      // Settings — LastSaved timestamp
       const now = new Date().toISOString();
-      const settingsData = [
-        {Key:'RefLabel1', Value:data.refLabels?.ref1||'Reference 1'},
-        {Key:'RefLabel2', Value:data.refLabels?.ref2||'Reference 2'},
-        {Key:'RefLabel3', Value:data.refLabels?.ref3||'Reference 3'},
-        {Key:'AppName',   Value:'WorkTrack'},
-        {Key:'OrgName',   Value:CONFIG.orgName||''},
-        {Key:'LastSaved', Value:now},
+      sheetToWorkbook(freshSWb,'Settings',[
+        {Key:'RefLabel1',   Value:data.refLabels?.ref1||'Reference 1'},
+        {Key:'RefLabel2',   Value:data.refLabels?.ref2||'Reference 2'},
+        {Key:'RefLabel3',   Value:data.refLabels?.ref3||'Reference 3'},
+        {Key:'AppName',     Value:'WorkTrack'},
+        {Key:'OrgName',     Value:CONFIG.orgName||''},
+        {Key:'LastSaved',   Value:now},
         {Key:'LastSavedBy', Value:currentUser?.name||''},
-      ];
-      sheetToWorkbook(sWb,'Settings', settingsData, ['Key','Value']);
+      ],['Key','Value']);
 
-      await uploadExcel(sWb, sharedFileRef?.driveId, sharedFileRef?.itemId, null);
+      // ── Step 5: Upload merged workbook ──
+      await uploadExcel(freshSWb, sharedFileRef.driveId, sharedFileRef.itemId, null);
+      setSharedWb(freshSWb); // update our reference to the fresh workbook
 
-      // Write private workbook if reviewer
+      // Private workbook — same fetch-merge-write approach
       if(currentUser?.isReviewer && privateWb && privateFileRef){
-        const pWb = privateWb;
-        sheetToWorkbook(pWb,'Assignments',privateAssignRows,ASSIGN_COLS);
-        sheetToWorkbook(pWb,'SubTasks',privateSubRows,SUB_COLS);
-        await uploadExcel(pWb, privateFileRef.driveId, privateFileRef.itemId, null);
+        const freshPWb = await downloadExcel(privateFileRef.driveId, privateFileRef.itemId, null);
+        const freshPrivAssign = parseSheet(freshPWb,'Assignments');
+        const freshPrivSubs   = parseSheet(freshPWb,'SubTasks');
+        const ourPrivIds = new Set(privateAssignRows.map(r=>r.ID));
+        const ourPrivSubIds = new Set(privateSubRows.map(r=>r.AssignmentID));
+        sheetToWorkbook(freshPWb,'Assignments',[
+          ...freshPrivAssign.filter(r=>!ourPrivIds.has(r.ID)),
+          ...privateAssignRows
+        ], ASSIGN_COLS);
+        sheetToWorkbook(freshPWb,'SubTasks',[
+          ...freshPrivSubs.filter(r=>!ourPrivSubIds.has(r.AssignmentID)),
+          ...privateSubRows
+        ], SUB_COLS);
+        sheetToWorkbook(freshPWb,'People',
+          data.people.map(p=>({ID:p.id,Name:p.name,Email:p.email||'',Role:p.role||'preparer',AccountType:p.accountType||'shared'})),
+          ['ID','Name','Email','Role','AccountType']);
+        await uploadExcel(freshPWb, privateFileRef.driveId, privateFileRef.itemId, null);
+        setPrivateWb(freshPWb);
       }
+
       setSaveState('saved');
       setTimeout(()=>setSaveState('idle'), 2000);
     } catch(err){
@@ -1027,10 +1082,17 @@ function fmtDate(iso){
   return dd+'/'+mm+'/'+yyyy;
 }
 
-// Parse dd/mm/yyyy or YYYY-MM-DD or "20 Jul 2025" into ISO string
+// Parse dd/mm/yyyy or YYYY-MM-DD or "20 Jul 2025" or Excel serial number into ISO string
 function parseDisplayDate(val){
-  if(!val) return '';
+  if(!val && val!==0) return '';
+  // Excel serial number (SheetJS reads date cells as numbers)
+  if(typeof val === 'number'){
+    // Excel date serial: days since 1900-01-01 (with leap year bug correction)
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+    if(!isNaN(d)) return d.toISOString().slice(0,10);
+  }
   val = val.toString().trim();
+  if(!val) return '';
   // dd/mm/yyyy
   const dmy = val.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if(dmy) return dmy[3]+'-'+dmy[2].padStart(2,'0')+'-'+dmy[1].padStart(2,'0');
@@ -1455,7 +1517,7 @@ function ExcelImportModal(p){
       try{
         const wb=XLSX.read(evt.target.result,{type:'array'});
         const sheetName=wb.SheetNames[0];
-        const sheetRows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:''});
+        const sheetRows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:'', raw:false, dateNF:'dd/mm/yyyy'});
         setParsed(parseExcelRows(sheetRows, p.people||[]));
       }catch(err){
         alert('Could not read this file. Make sure it is a valid .xlsx file.\n\n'+err.message);
