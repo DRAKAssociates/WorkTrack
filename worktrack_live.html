@@ -1095,7 +1095,7 @@ function dueBadge(due, status, nextHearing){
   return null;
 }
 
-const BLANK_FILTER={fy:'all',quarter:'all',month:'all',status:'all',urgency:'all',subStatus:'all'};
+const BLANK_FILTER={fy:'all',quarter:'all',month:'all',status:'active',urgency:'all',subStatus:'all'};
 const MONTHS_LIST=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const QUARTERS=['Q1','Q2','Q3','Q4'];
 
@@ -1519,7 +1519,8 @@ function MiniFilterBar(p){
        e('option',{key:'none',value:'none'},'No progress set'),
        ...allSubStatuses.map(s=>e('option',{key:s,value:s},s))]
     ) : null,
-    p.showStatus!==false ? STATUSES.map(s=>e('span',{key:s,onClick:ev=>{ev.stopPropagation();upd({status:s});},style:(f.status||'all')===s?pillActive:pillInactive},s==='all'?'All':s[0].toUpperCase()+s.slice(1))) : null
+    p.showStatus!==false ? ['active',...STATUSES].map(s=>e('span',{key:s,onClick:ev=>{ev.stopPropagation();upd({status:s});},style:(f.status||'all')===s?pillActive:pillInactive},
+      s==='active'?'Active only':s==='all'?'All':s[0].toUpperCase()+s.slice(1))) : null
   );
 }
 
@@ -1694,510 +1695,121 @@ function BulkCreateModal(p){
   rowsForTask.forEach(r=>{ if(!byClient[r.cid]||(r.period||'')>(byClient[r.cid].period||'')) byClient[r.cid]=r; });
 
   const modalTeam = (p.team&&p.team.length) ? p.team : [];
-  const [monthIdx,setMonthIdx]=useState(new Date().getMonth());
-  // Derive calendar year from FY selection — default current FY
-  const now=new Date();
-  const curFY = now.getMonth()>=3 ? now.getFullYear() : now.getFullYear()-1; // Apr start
-  const [fyStart,setFyStart]=useState(curFY); // e.g. 2025 for FY25-26
-  const calYear = monthIdx>=3 ? fyStart : fyStart+1; // Apr-Mar = fyStart; Jan-Mar = fyStart+1
-  const fyLabel = 'FY'+String(fyStart).slice(-2)+'-'+String(fyStart+1).slice(-2);
+  const [rows,setRows]=React.useState(null);
 
-  const [defaultPrep,setDefaultPrep]=useState(modalTeam[0]?.id||'');
-  const [defaultRev,setDefaultRev]=useState(modalTeam[0]?.id||'');
-  const [rows,setRows]=useState(null);
+  React.useEffect(()=>{ buildPreview(); },[]);
+
+  const nextPeriod=(period, freq)=>{
+    if(!period) return null;
+    const comps = periodToComponents(period);
+    const fy = comps.fy, quarter = comps.quarter, month = comps.month;
+    const fyMatch = (fy||'').match(/FY(\d{2})-(\d{2})$/);
+    if(!fyMatch) return null;
+    const fyEnd = parseInt('20'+fyMatch[2]);
+    if(freq==='quarterly' && quarter && quarter!=='NA'){
+      const qNum = parseInt(quarter.replace('Q',''));
+      if(qNum<4) return 'Q'+(qNum+1)+' FY'+String(fyEnd).slice(-2);
+      return 'Q1 FY'+String(fyEnd+1).slice(-2);
+    }
+    if(month && month!=='NA'){
+      const mi = MONTH_NAMES.indexOf(month);
+      if(mi<0) return null;
+      const newMi = (mi+1)%12;
+      const newMonth = MONTH_NAMES[newMi];
+      const calYr = newMi<=2 ? fyEnd : fyEnd-1;
+      return newMonth+' '+calYr;
+    }
+    return 'FY'+String(fyEnd).slice(-2)+'-'+String(fyEnd+1).slice(-2);
+  };
+
+  const nextDueDate=(prevDue, freq)=>{
+    const d = parseDueDate(prevDue);
+    if(!d) return '';
+    const monthsAdd = freq==='quarterly' ? 3 : freq==='yearly' ? 12 : 1;
+    const targetMonth = d.getMonth() + monthsAdd;
+    const targetYear = d.getFullYear() + Math.floor(targetMonth/12);
+    const normMonth = ((targetMonth%12)+12)%12;
+    const lastDay = new Date(targetYear, normMonth+1, 0).getDate();
+    const day = Math.min(d.getDate(), lastDay);
+    return new Date(targetYear, normMonth, day).toISOString().slice(0,10);
+  };
 
   const buildPreview=()=>{
     const out=[];
-    p.clients.forEach(cl=>{
-      const ref=byClient[cl.id];
-      const freq = ref ? (ref.freq||'monthly') : 'monthly';
-      const usedFreq = (freq && freq!=='none') ? freq : 'monthly';
-      const per=periodForMonth(monthIdx,calYear,usedFreq);
-      if(per===null) return;
-      const exists=p.ct.some(x=>x.tid===td.id && x.cid===cl.id && x.period===per);
-      if(exists) return;
-
-      // Due date: shift previous due date forward by 1 month (monthly) or 3 months (quarterly/yearly)
-      // Falls back to 20th of the target month if no prior due date
-      let dueDateStr;
-      const prevDue = ref ? parseDueDate(ref.due) : null;
-      if(prevDue){
-        const monthsToAdd = usedFreq==='monthly' ? 1 : usedFreq==='quarterly' ? 3 : 12;
-        const shifted = new Date(prevDue);
-        shifted.setMonth(shifted.getMonth() + monthsToAdd);
-        // If day overflowed (e.g. Jan 31 + 1 month = Mar 3), clamp to last day of target month
-        dueDateStr = shifted.toISOString().slice(0,10);
-      } else {
-        // No prior task — default to 20th of the selected month
-        dueDateStr = new Date(calYear, monthIdx, 20).toISOString().slice(0,10);
-      }
-
-      out.push({
-        cid:cl.id, cname:cl.name, freq:usedFreq, period:per,
-        due: dueDateStr,
-        prevDue: ref?.due||null, // shown as hint
-        prep: ref ? ref.prep : defaultPrep,
-        pi:  ref ? ref.pi  : modalTeam.findIndex(t=>t.id===(ref?ref.prep:defaultPrep)),
-        rev:  ref ? ref.rev  : defaultRev,
-        ri:   ref ? ref.ri   : modalTeam.findIndex(t=>t.id===(ref?ref.rev:defaultRev)),
-        noPriorInstance: !ref, selected:true
-      });
+    Object.entries(byClient).forEach(([cid, ref])=>{
+      const freq = (ref.freq&&ref.freq!=='none') ? ref.freq : 'monthly';
+      const period = nextPeriod(ref.period, freq);
+      if(!period) return;
+      if(p.ct.some(x=>x.tid===td.id && x.cid===cid && x.period===period)) return;
+      const due = nextDueDate(ref.due, freq);
+      out.push({cid, cname:(p.clients.find(c=>c.id===cid)||{}).name||cid,
+        freq, prevPeriod:ref.period||'—', period, prevDue:ref.due||'', due,
+        prep:ref.prep, rev:ref.rev, pi:ref.pi||0, ri:ref.ri||0, selected:true});
     });
+    out.sort((a,b)=>a.cname.localeCompare(b.cname));
     setRows(out);
   };
 
   const updateRow=(cid,patch)=>setRows(prev=>prev.map(r=>r.cid===cid?{...r,...patch}:r));
 
   const confirm=()=>{
-    rows.filter(r=>r.selected).forEach(r=>{
+    (rows||[]).filter(r=>r.selected).forEach(r=>{
       const pi=modalTeam.findIndex(t=>t.id===r.prep);
       const ri=modalTeam.findIndex(t=>t.id===r.rev);
       p.onCreate({id:uid(),tid:td.id,cid:r.cid,period:r.period,due:r.due,
-        prep:r.prep,pi:pi>=0?pi:0,rev:r.rev,ri:ri>=0?ri:0,
+        prep:r.prep,pi:pi>=0?pi:r.pi,rev:r.rev,ri:ri>=0?ri:r.ri,
         status:'pending',od:false,freq:r.freq,hearingLog:[],st:[]});
     });
     p.onClose();
   };
 
-  const inp={fontSize:11,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',outline:'none'};
-  const lbl={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
-  const selStyle={...inp,width:'100%',fontSize:12,padding:'7px 9px'};
+  const inp={fontSize:10,padding:'3px 6px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',outline:'none'};
+  const selectedCount=(rows||[]).filter(r=>r.selected).length;
+  const totalCount=(rows||[]).length;
 
-  // FY options — last 3 and next 2 years
-  const fyOptions=[];
-  for(let y=curFY-2;y<=curFY+2;y++) fyOptions.push({value:y,label:'FY'+String(y).slice(-2)+'-'+String(y+1).slice(-2)});
-
-  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:20}},
-    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:600,maxHeight:'90vh',overflowY:'auto',boxShadow:'0 4px 24px rgba(0,0,0,0.15)'}},
-      e('div',{style:{fontSize:15,fontWeight:600,color:'var(--color-text-primary)',marginBottom:4}},'Create '+td.label+' for clients'),
-      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},'Select the period and assign people. Each client gets one task — already-existing period+client combinations are skipped.'),
-
-      !rows ? e(React.Fragment,null,
-        // Period selection
-        e('div',{style:{fontSize:10,fontWeight:600,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8}},'Period'),
-        e('div',{style:{display:'flex',gap:10,marginBottom:12}},
-          e('div',{style:{flex:1}},
-            e('label',{style:lbl},'Financial Year'),
-            e('select',{style:selStyle,value:fyStart,onChange:ev=>setFyStart(parseInt(ev.target.value))},
-              fyOptions.map(f=>e('option',{key:f.value,value:f.value},f.label)))
-          ),
-          e('div',{style:{flex:1}},
-            e('label',{style:lbl},'Month'),
-            e('select',{style:selStyle,value:monthIdx,onChange:ev=>setMonthIdx(parseInt(ev.target.value))},
-              MONTH_NAMES.map((m,i)=>e('option',{key:m,value:i},m)))
-          )
-        ),
-        e('div',{style:{fontSize:10,color:'#2D6BE4',background:'#F0F5FF',border:'0.5px solid #93B4F0',borderRadius:'var(--border-radius-md)',padding:'7px 10px',marginBottom:16}},
-          '📅 Period: '+fyLabel+' · '+MONTH_NAMES[monthIdx]+' '+calYear,
-          e('br'),
-          monthIsQuarterEnd(monthIdx) ? '✓ Quarter end — Q tasks included' : '— Not a quarter end, only monthly tasks',
-          monthIsYearEnd(monthIdx) ? '  ✓ Year end — annual tasks included' : ''
-        ),
-        // Default people
-        e('div',{style:{fontSize:10,fontWeight:600,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8}},'Default assignment (for clients with no prior task)'),
-        e('div',{style:{display:'flex',gap:10,marginBottom:20}},
-          e('div',{style:{flex:1}},
-            e('label',{style:lbl},'Preparer'),
-            e('select',{style:selStyle,value:defaultPrep,onChange:ev=>setDefaultPrep(ev.target.value)},
-              modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
-          ),
-          e('div',{style:{flex:1}},
-            e('label',{style:lbl},'Reviewer'),
-            e('select',{style:selStyle,value:defaultRev,onChange:ev=>setDefaultRev(ev.target.value)},
-              modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
-          )
-        ),
-        e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
-          e(Btn,{onClick:p.onClose},'Cancel'),
-          e(Btn,{pri:true,onClick:buildPreview},'Preview clients →')
-        )
-
-      ) : e(React.Fragment,null,
-        rows.length===0
-          ? e('div',{style:{padding:20,textAlign:'center',fontSize:12,color:'var(--color-text-tertiary)'}},'No clients are due for '+MONTH_NAMES[monthIdx]+' '+calYear+' — all already exist or none match this frequency.')
-          : e('div',{style:{marginBottom:14}},
-              e('div',{style:{display:'grid',gridTemplateColumns:'20px 1fr 70px 100px 1fr 110px',gap:6,padding:'4px 6px',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'var(--color-text-tertiary)',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
-                e('div'),e('div','Client'),e('div','Freq'),e('div','Period'),e('div','Due date'),e('div','Preparer')
-              ),
-              rows.map(r=>e('div',{key:r.cid,style:{display:'grid',gridTemplateColumns:'20px 1fr 70px 100px 1fr 110px',gap:6,alignItems:'center',padding:'6px',borderBottom:'0.5px solid var(--color-border-tertiary)',background:r.noPriorInstance?'#FAEEDA':'transparent'}},
-                e('input',{type:'checkbox',checked:r.selected,onChange:ev=>updateRow(r.cid,{selected:ev.target.checked}),style:{margin:0}}),
-                e('div',null,
-                  e('div',{style:{fontSize:11,color:'var(--color-text-primary)',fontWeight:500}},r.cname),
-                  r.noPriorInstance?e('div',{style:{fontSize:9,color:'#633806'}},'No prior task — using defaults'):null
-                ),
-                e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},r.freq),
-                e('input',{value:r.period,onChange:ev=>updateRow(r.cid,{period:ev.target.value}),style:{...inp,width:'100%'}}),
-                e('div',null,
-                  e('input',{type:'date',value:r.due,onChange:ev=>updateRow(r.cid,{due:ev.target.value}),style:{...inp,width:'100%'}}),
-                  r.prevDue ? e('div',{style:{fontSize:8,color:'var(--color-text-tertiary)',marginTop:2}},
-                    'Prev: '+r.prevDue+' +'+(r.freq==='monthly'?'1m':r.freq==='quarterly'?'3m':'12m')) : null
-                ),
-                e('select',{value:r.prep,onChange:ev=>updateRow(r.cid,{prep:ev.target.value}),style:{...inp,width:'100%'}},
-                  modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name.split(' ')[0])))
-              ))
-            ),
-        e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:12}},
-          e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},rows.filter(r=>r.selected).length+' of '+rows.length+' clients selected'),
-          e('div',{style:{display:'flex',gap:8}},
-            e(Btn,{onClick:()=>setRows(null)},'← Back'),
-            e(Btn,{onClick:p.onClose},'Cancel'),
-            rows.filter(r=>r.selected).length>0
-              ? e(Btn,{pri:true,onClick:confirm},'Create '+rows.filter(r=>r.selected).length+' tasks')
-              : null
-          )
-        )
-      )
-    )
-  );
-}
-
-// ---------- Closing prompt modal ----------
-function ClosingPromptModal(p){
-  const {row, taskDef, refLabels, closeType, onConfirm, onCancel} = p;
-  const isCompliance = !!taskDef.isCompliance;
-  const isAssessment = taskDef.bucket==='assessment';
-
-  const [filedDate,setFiledDate]=useState(row.filedDate||'');
-  const [ackNo,setAckNo]=useState(row.ackNo||'');
-  const [fy,setFy]=useState(row.fy||'');
-  const [ref1,setRef1]=useState(row.ref1||'');
-  const [ref2,setRef2]=useState(row.ref2||'');
-  const [ref3,setRef3]=useState(row.ref3||'');
-
-  const inputStyle={fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
-  const labelStyle={fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
-  const fieldWrap={marginBottom:12};
-
-  const handleConfirm=()=>{
-    const details={};
-    if(isCompliance){ details.filedDate=filedDate||undefined; details.ackNo=ackNo||undefined; }
-    if(isAssessment){ details.fy=fy||undefined; details.ref1=ref1||undefined; details.ref2=ref2||undefined; details.ref3=ref3||undefined; }
-    onConfirm(details);
-  };
-
-  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1100,padding:20}},
-    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:380,boxShadow:'0 0 0 1px var(--color-border-tertiary)'}},
-      e('div',{style:{fontSize:14,fontWeight:500,color:'var(--color-text-primary)',marginBottom:3}},
-        closeType==='noApproval'?'Close without approval':closeType==='approveAndFile'?'Approve & file':'Mark as filed'),
-      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},
-        taskDef.label+' · '+(row.period||'no period')+(closeType==='noApproval'?' — closing without reviewer approval.'
-          :closeType==='approveAndFile'?' — you are approving and filing this in one step.'
-          :' — enter filing details to mark as done.')
-      ),
-
-      isCompliance ? e(React.Fragment,null,
-        e('div',{style:{fontSize:11,fontWeight:500,color:'#2D6BE4',marginBottom:10,paddingBottom:6,borderBottom:'0.5px solid var(--color-border-tertiary)'}},'Filing details'),
-        e('div',{style:fieldWrap},e('label',{style:labelStyle},'Filed date'),
-          e('input',{style:inputStyle,placeholder:'e.g. 20 Jun',value:filedDate,onChange:ev=>setFiledDate(ev.target.value)})
-        ),
-        e('div',{style:fieldWrap},e('label',{style:labelStyle},'Acknowledgement number'),
-          e('input',{style:inputStyle,placeholder:'Ack. no.',value:ackNo,onChange:ev=>setAckNo(ev.target.value)})
-        )
-      ) : null,
-
-      isAssessment ? e(React.Fragment,null,
-        e('div',{style:{fontSize:11,fontWeight:500,color:'#2D6BE4',marginBottom:10,paddingBottom:6,borderBottom:'0.5px solid var(--color-border-tertiary)',marginTop:isCompliance?12:0}},'Assessment details'),
-        e('div',{style:fieldWrap},e('label',{style:labelStyle},'FY'),
-          e('select',{style:inputStyle,value:fy,onChange:ev=>setFy(ev.target.value)},
-            [e('option',{key:'',value:''},'— select FY —'),...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f))]
-          )
-        ),
-        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}},
-          e('div',null,e('label',{style:labelStyle},refLabels.ref1),e('input',{style:inputStyle,value:ref1,onChange:ev=>setRef1(ev.target.value)})),
-          e('div',null,e('label',{style:labelStyle},refLabels.ref2),e('input',{style:inputStyle,value:ref2,onChange:ev=>setRef2(ev.target.value)})),
-          e('div',null,e('label',{style:labelStyle},refLabels.ref3),e('input',{style:inputStyle,value:ref3,onChange:ev=>setRef3(ev.target.value)}))
-        )
-      ) : null,
-
-      e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:14}},
-        'All fields are optional — you can fill them in later by expanding the task row.'
-      ),
-
-      closeType==='noApproval' ? e('div',{style:{fontSize:10,color:'#993C1D',background:'#FAECE7',border:'0.5px solid #F0997B',borderRadius:'var(--border-radius-md)',padding:'6px 9px',marginBottom:14}},
-        '⚠ This will be flagged as "closed without approval" in Compliance history.'
-      ) : null,
-
-      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
-        e(Btn,{onClick:onCancel},'Cancel'),
-        e(Btn,{pri:true,onClick:handleConfirm},closeType==='noApproval'?'Close without approval':closeType==='approveAndFile'?'Approve & file':'Mark as filed')
-      )
-    )
-  );
-}
-
-// ---------- Reassign Modal ----------
-function ReassignModal(p){
-  // p.row, p.team, p.onSave(prep, rev), p.onClose
-  const [prep, setPrep] = useState(p.row.prep);
-  const [rev,  setRev]  = useState(p.row.rev);
-  const inp = {fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
-  const lbl = {fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
-  const taskDef = p.taskDef || {};
-  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1050,padding:20}},
-    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:380,boxShadow:'0 4px 24px rgba(0,0,0,0.15)'}},
-      e('div',{style:{fontSize:15,fontWeight:600,color:'var(--color-text-primary)',marginBottom:4}},'Reassign task'),
-      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},(taskDef.label||'Task')+' · '+(p.row.period||'no period')),
-      e('div',{style:{marginBottom:12}},
-        e('label',{style:lbl},'Preparer'),
-        e('select',{style:inp,value:prep,onChange:ev=>setPrep(ev.target.value)},
-          p.team.map(t=>e('option',{key:t.id,value:t.id},t.name)))
-      ),
-      e('div',{style:{marginBottom:20}},
-        e('label',{style:lbl},'Reviewer'),
-        e('select',{style:inp,value:rev,onChange:ev=>setRev(ev.target.value)},
-          p.team.map(t=>e('option',{key:t.id,value:t.id},t.name)))
-      ),
-      e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)',marginBottom:16,padding:'7px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},'Task status stays as-is. The newly assigned preparer will see it in their queue.'),
-      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
-        e(Btn,{onClick:p.onClose},'Cancel'),
-        e(Btn,{pri:true,onClick:()=>{p.onSave(prep,rev);p.onClose();}},'Reassign')
-      )
-    )
-  );
-}
-
-// ---------- Self-complete Modal ----------
-function SelfCompleteModal(p){
-  // p.row, p.isCompliance, p.onSave(details), p.onClose
-  const [filedDate, setFiledDate] = useState('');
-  const [ackNo, setAckNo]         = useState('');
-  const [note, setNote]           = useState('');
-  const inp = {fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
-  const lbl = {fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
-  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1050,padding:20}},
-    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:380,boxShadow:'0 4px 24px rgba(0,0,0,0.15)'}},
-      e('div',{style:{fontSize:15,fontWeight:600,color:'var(--color-text-primary)',marginBottom:4}},'Self-complete task'),
-      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},'You prepared and reviewed this yourself. Task will be marked Done.'),
-      p.isCompliance ? e('div',{style:{marginBottom:12}},
-        e('label',{style:lbl},'Filed date'),
-        e('input',{type:'date',style:inp,value:filedDate,onChange:ev=>setFiledDate(ev.target.value)})
-      ) : null,
-      p.isCompliance ? e('div',{style:{marginBottom:12}},
-        e('label',{style:lbl},'Acknowledgement number'),
-        e('input',{style:inp,placeholder:'Ack. no.',value:ackNo,onChange:ev=>setAckNo(ev.target.value)})
-      ) : null,
-      e('div',{style:{marginBottom:20}},
-        e('label',{style:lbl},'Note (optional)'),
-        e('input',{style:inp,placeholder:'e.g. Handled directly due to urgency',value:note,onChange:ev=>setNote(ev.target.value)})
-      ),
-      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
-        e(Btn,{onClick:p.onClose},'Cancel'),
-        e(Btn,{pri:true,onClick:()=>{p.onSave({filedDate,ackNo,note});p.onClose();}},'Mark as Done')
-      )
-    )
-  );
-}
-
-// ---------- Cancel Task Modal ----------
-function CancelTaskModal(p){
-  // p.row, p.onSave(reason), p.onClose
-  const [reason, setReason] = useState('');
-  const inp = {fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
-  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1050,padding:20}},
-    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:380,boxShadow:'0 4px 24px rgba(0,0,0,0.15)'}},
-      e('div',{style:{fontSize:15,fontWeight:600,color:'var(--color-text-primary)',marginBottom:4}},'Cancel task'),
-      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},'Task will be marked Cancelled and remain visible in history.'),
-      e('div',{style:{marginBottom:20}},
-        e('label',{style:{fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'}},'Reason (optional)'),
-        e('input',{style:inp,autoFocus:true,placeholder:'e.g. Client withdrew, created by mistake…',value:reason,
-          onChange:ev=>setReason(ev.target.value),
-          onKeyDown:ev=>{if(ev.key==='Enter'){p.onSave(reason);p.onClose();}}
-        })
-      ),
-      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8}},
-        e(Btn,{onClick:p.onClose},'Back'),
-        e(Btn,{onClick:()=>{p.onSave(reason);p.onClose();},style:{borderColor:'#993C1D',color:'#993C1D'}},'Cancel task')
-      )
-    )
-  );
-}
-
-// ---------- Edit Task Modal ----------
-function EditTaskModal(p){
-  // p.row, p.taskDef, p.clients, p.team, p.groups, p.refLabels, p.onSave(patch), p.onClose
-  const r = p.row;
-  const td = p.taskDef||{};
-  const modalTeam = p.team||[];
-
-  // Resolve current per-assignment compliance (undefined = inherit)
-  const inheritedCompliance = !!td.isCompliance;
-  const [compOverride, setCompOverride] = useState(
-    r.isCompliance===true ? 'yes' : r.isCompliance===false ? 'no' : 'inherit'
-  );
-
-  const [clientId, setClientId]   = useState(r.cid||'');
-  const [fy,       setFy]         = useState(r.period ? (periodToComponents(r.period).fy||'') : '');
-  const [quarter,  setQuarter]    = useState(r.period ? (periodToComponents(r.period).quarter||'') : '');
-  const [month,    setMonth]      = useState(r.period ? (periodToComponents(r.period).month||'') : '');
-  const [due,      setDue]        = useState(r.due||'');
-  const [prep,     setPrep]       = useState(r.prep||'');
-  const [rev,      setRev]        = useState(r.rev||'');
-  const [freq,     setFreq]       = useState(r.freq||'none');
-  const [refFY,    setRefFY]      = useState(r.fy||'');
-  const [ref1,     setRef1]       = useState(r.ref1||'');
-  const [ref2,     setRef2]       = useState(r.ref2||'');
-  const [ref3,     setRef3]       = useState(r.ref3||'');
-
-  const inp  = {fontSize:12,padding:'7px 9px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',width:'100%',outline:'none'};
-  const lbl  = {fontSize:11,fontWeight:500,color:'var(--color-text-secondary)',marginBottom:4,display:'block'};
-  const sec  = {fontSize:10,fontWeight:600,color:'var(--color-text-tertiary)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8,marginTop:16,paddingBottom:4,borderBottom:'0.5px solid var(--color-border-tertiary)'};
-  const wrap = {marginBottom:12};
-
-  const buildPeriod=()=>{
-    const fyVal = (!fy||fy==='NA') ? null : fy;
-    const qVal  = (!quarter||quarter==='NA') ? null : quarter;
-    const mVal  = (!month||month==='NA') ? null : month;
-    return fyVal ? componentsToPeriod(fyVal,qVal,mVal) : null;
-  };
-
-  const handleSave=()=>{
-    const patch = {
-      cid: clientId||null,
-      period: buildPeriod(),
-      due,
-      prep, rev,
-      pi: modalTeam.findIndex(t=>t.id===prep),
-      ri: modalTeam.findIndex(t=>t.id===rev),
-      freq,
-      fy: refFY||undefined,
-      ref1: ref1||undefined, ref2: ref2||undefined, ref3: ref3||undefined,
-      // Per-assignment compliance override
-      isCompliance: compOverride==='yes' ? true : compOverride==='no' ? false : undefined
-    };
-    p.onSave(patch);
-    p.onClose();
-  };
-
-  const isAssessment = td.bucket==='assessment';
-
-  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1050,padding:16}},
-    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:500,maxHeight:'92vh',overflowY:'auto',boxShadow:'0 4px 32px rgba(0,0,0,0.18)'}},
-
+  return e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}},
+    e('div',{style:{background:'var(--color-background-primary)',borderRadius:'var(--border-radius-lg)',padding:'20px 22px',width:620,maxHeight:'92vh',overflowY:'auto',boxShadow:'0 4px 32px rgba(0,0,0,0.18)'}},
       e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}},
-        e('div',{style:{fontSize:15,fontWeight:600,color:'var(--color-text-primary)'}},'Edit task'),
+        e('div',{style:{fontSize:15,fontWeight:600,color:'var(--color-text-primary)'}},'Create next period — '+td.label),
         e('button',{onClick:p.onClose,style:{background:'none',border:'none',cursor:'pointer',fontSize:16,color:'var(--color-text-tertiary)',padding:4}},'✕')
       ),
-      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},td.label||'Task'),
-
-      // Task type — read only (not editable, would break history)
-      e('div',{style:{...wrap,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',fontSize:11,color:'var(--color-text-secondary)'}},'Task type: ',e('strong',null,td.label),' · Bucket: ',e('strong',null,td.bucket),e('br'),e('span',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},'Task type cannot be changed here — it would break the history trail. If this was created under the wrong task type, cancel it and create a new one.')),
-
-      e('div',{style:sec},'Assignment'),
-
-      // Client
-      e('div',{style:wrap},
-        e('label',{style:lbl},'Client'),
-        e('select',{style:inp,value:clientId,onChange:ev=>setClientId(ev.target.value)},
-          e('option',{value:''},'— no client —'),
-          ...p.clients.map(c=>e('option',{key:c.id,value:c.id},c.name))
-        )
+      e('div',{style:{fontSize:11,color:'var(--color-text-tertiary)',marginBottom:16}},'Next period auto-derived from each client\'s latest assignment. Same day, next cycle. Uncheck any to skip.'),
+      !rows ? e('div',{style:{textAlign:'center',padding:20,color:'var(--color-text-tertiary)'}},'Loading…') :
+      rows.length===0 ? e('div',{style:{textAlign:'center',padding:20,fontSize:12,color:'var(--color-text-tertiary)'}},'All clients already have the next period, or no existing assignments found.') :
+      e(React.Fragment,null,
+        e('div',{style:{display:'flex',alignItems:'center',gap:8,padding:'7px 10px',background:'#EBF2FF',borderRadius:'var(--border-radius-md)',marginBottom:10,fontSize:11}},
+          e('span',{style:{color:'#2D6BE4',fontWeight:500}},totalCount+' clients'),
+          e('span',{style:{color:'var(--color-text-tertiary)'}},'·'),
+          e('span',{style:{color:'var(--color-text-secondary)'}},'Due dates editable below'),
+          e('label',{style:{marginLeft:'auto',display:'flex',alignItems:'center',gap:4,cursor:'pointer',fontSize:10,color:'var(--color-text-secondary)'}},
+            e('input',{type:'checkbox',checked:rows.every(r=>r.selected),onChange:ev=>setRows(prev=>prev.map(r=>({...r,selected:ev.target.checked}))),style:{margin:0}}),
+            'Select all')
+        ),
+        e('div',{style:{display:'grid',gridTemplateColumns:'20px 1fr 70px 100px 110px',gap:8,padding:'4px 8px',fontSize:9,textTransform:'uppercase',letterSpacing:'.04em',color:'var(--color-text-tertiary)',borderBottom:'0.5px solid var(--color-border-tertiary)',marginBottom:4}},
+          e('div'),e('div','Client'),e('div','Freq'),e('div','Next period'),e('div','Due date')),
+        rows.map(r=>e('div',{key:r.cid,style:{display:'grid',gridTemplateColumns:'20px 1fr 70px 100px 110px',gap:8,alignItems:'center',padding:'6px 8px',borderBottom:'0.5px solid var(--color-border-tertiary)',opacity:r.selected?1:0.45}},
+          e('input',{type:'checkbox',checked:r.selected,onChange:ev=>updateRow(r.cid,{selected:ev.target.checked}),style:{margin:0}}),
+          e('div',null,
+            e('div',{style:{fontSize:11,color:'var(--color-text-primary)',fontWeight:500}},r.cname),
+            e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},r.prevPeriod+' → '+r.period)),
+          e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},r.freq),
+          e('div',{style:{fontSize:11,color:'#2D6BE4',fontWeight:500}},r.period),
+          e('div',null,
+            e('input',{type:'date',value:r.due,onChange:ev=>updateRow(r.cid,{due:ev.target.value}),style:{...inp,width:'100%'}}),
+            r.prevDue ? e('div',{style:{fontSize:8,color:'var(--color-text-tertiary)',marginTop:1}},'prev: '+r.prevDue) : null)
+        ))
       ),
-
-      // Period
-      e('div',{style:wrap},
-        e('label',{style:lbl},'Period'),
+      rows && rows.length>0 ? e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14,paddingTop:12,borderTop:'0.5px solid var(--color-border-tertiary)'}},
+        e('span',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},selectedCount+' of '+totalCount+' selected'),
         e('div',{style:{display:'flex',gap:8}},
-          e('select',{style:{...inp,flex:2},value:fy,onChange:ev=>setFy(ev.target.value)},
-            e('option',{value:''},'FY…'),
-            e('option',{value:'NA'},'NA'),
-            ...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f))
-          ),
-          e('select',{style:{...inp,flex:1},value:quarter,onChange:ev=>{setQuarter(ev.target.value);if(ev.target.value&&ev.target.value!=='NA')setMonth('NA');}},
-            e('option',{value:''},'Quarter'),
-            e('option',{value:'NA'},'NA'),
-            ...QUARTERS.map(q=>e('option',{key:q,value:q},q))
-          ),
-          e('select',{style:{...inp,flex:1},value:month,onChange:ev=>{setMonth(ev.target.value);if(ev.target.value&&ev.target.value!=='NA')setQuarter('NA');}},
-            e('option',{value:''},'Month'),
-            e('option',{value:'NA'},'NA'),
-            ...MONTH_NAMES.map(m=>e('option',{key:m,value:m},m))
-          )
-        ),
-        buildPeriod() ? e('div',{style:{fontSize:9,color:'#0F6E56',marginTop:4}},'Period: '+buildPeriod()) : null
-      ),
-
-      // Due date
-      e('div',{style:wrap},
-        e('label',{style:lbl},'Due date'),
-        e('input',{type:'date',style:inp,value:due,onChange:ev=>setDue(ev.target.value)})
-      ),
-
-      // Preparer / Reviewer
-      e('div',{style:{display:'flex',gap:10,...wrap}},
-        e('div',{style:{flex:1}},
-          e('label',{style:lbl},'Preparer'),
-          e('select',{style:inp,value:prep,onChange:ev=>setPrep(ev.target.value)},
-            modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
-        ),
-        e('div',{style:{flex:1}},
-          e('label',{style:lbl},'Reviewer'),
-          e('select',{style:inp,value:rev,onChange:ev=>setRev(ev.target.value)},
-            modalTeam.map(t=>e('option',{key:t.id,value:t.id},t.name)))
+          e('button',{onClick:p.onClose,style:{fontSize:11,padding:'5px 11px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'transparent',color:'var(--color-text-secondary)',cursor:'pointer'}},'Cancel'),
+          selectedCount>0 ? e('button',{onClick:confirm,style:{fontSize:11,padding:'5px 14px',border:'none',borderRadius:'var(--border-radius-md)',background:'#2D6BE4',color:'#fff',cursor:'pointer',fontWeight:500}},'Create '+selectedCount+' assignments') : null
         )
-      ),
-
-      // Frequency
-      e('div',{style:wrap},
-        e('label',{style:lbl},'Frequency'),
-        e('select',{style:inp,value:freq,onChange:ev=>setFreq(ev.target.value)},
-          FREQUENCIES.map(f=>e('option',{key:f.id,value:f.id},f.label)))
-      ),
-
-      // Compliance override
-      e('div',{style:sec},'Compliance tracker'),
-      e('div',{style:{...wrap,padding:'10px 12px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},
-        e('div',{style:{fontSize:11,color:'var(--color-text-secondary)',marginBottom:8}},
-          'Task type default: ',e('strong',null,inheritedCompliance?'Compliance filing':'Not compliance')),
-        e('div',{style:{display:'flex',gap:6}},
-          [{val:'inherit',label:'Use default'},{val:'yes',label:'Yes — include in compliance tracker'},{val:'no',label:'No — exclude from compliance tracker'}].map(opt=>
-            e('label',{key:opt.val,style:{fontSize:11,display:'flex',alignItems:'center',gap:4,cursor:'pointer',
-              padding:'5px 10px',borderRadius:'var(--border-radius-md)',
-              background:compOverride===opt.val?'#EBF2FF':'transparent',
-              border:'0.5px solid '+(compOverride===opt.val?'#2D6BE4':'var(--color-border-secondary)'),
-              color:compOverride===opt.val?'#2D6BE4':'var(--color-text-secondary)'}},
-              e('input',{type:'radio',name:'compOverride',value:opt.val,checked:compOverride===opt.val,onChange:()=>setCompOverride(opt.val),style:{margin:0}}),
-              opt.label)
-          )
-        ),
-        compOverride==='no' ? e('div',{style:{fontSize:9,color:'#993C1D',marginTop:6}},'This assignment will not appear in Compliance History, even though the task type is marked as compliance.') : null,
-        compOverride==='yes' && !inheritedCompliance ? e('div',{style:{fontSize:9,color:'#0F6E56',marginTop:6}},'This assignment will appear in Compliance History, overriding the task type default.') : null
-      ),
-
-      // Assessment fields
-      isAssessment ? e(React.Fragment,null,
-        e('div',{style:sec},'Assessment details'),
-        e('div',{style:{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:8,...wrap}},
-          e('div',null,
-            e('label',{style:lbl},'Assessment FY'),
-            e('select',{style:inp,value:refFY,onChange:ev=>setRefFY(ev.target.value)},
-              e('option',{value:''},'—'),
-              ...FY_OPTIONS.map(f=>e('option',{key:f,value:f},f)))
-          ),
-          e('div',null,
-            e('label',{style:lbl},(p.refLabels&&p.refLabels.ref1)||'Reference 1'),
-            e('input',{style:inp,value:ref1,onChange:ev=>setRef1(ev.target.value)})
-          ),
-          e('div',null,
-            e('label',{style:lbl},(p.refLabels&&p.refLabels.ref2)||'Reference 2'),
-            e('input',{style:inp,value:ref2,onChange:ev=>setRef2(ev.target.value)})
-          ),
-          e('div',null,
-            e('label',{style:lbl},(p.refLabels&&p.refLabels.ref3)||'Reference 3'),
-            e('input',{style:inp,value:ref3,onChange:ev=>setRef3(ev.target.value)})
-          )
-        ),
-        r.hearingLog&&r.hearingLog.length>0 ? e('div',{style:{fontSize:9,color:'var(--color-text-tertiary)',marginBottom:12,padding:'6px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)'}},'📋 '+r.hearingLog.length+' hearing log '+( r.hearingLog.length===1?'entry':'entries')+' — export Excel to view full history. Next hearing date is editable from the task row.') : null
-      ) : null,
-
-      e('div',{style:{display:'flex',justifyContent:'flex-end',gap:8,paddingTop:12,borderTop:'0.5px solid var(--color-border-tertiary)'}},
-        e(Btn,{onClick:p.onClose},'Cancel'),
-        e(Btn,{pri:true,onClick:handleSave},'Save changes')
-      )
+      ) : null
     )
   );
 }
 
-// ---------- Add / Edit Client modal ----------
 function AddClientModal(p){
   // p.client = existing client (for edit) or null (for new)
   // p.onSave(name, defaultFreq), p.onClose
@@ -2612,7 +2224,8 @@ function WorkTrackApp(p){
     return init;
   });
   const [globalDueFilter, setGlobalDueFilter] = useState('all');
-  const [myTasksOnly, setMyTasksOnly] = useState(false); // toggle: show only my tasks
+  const [myTasksOnly, setMyTasksOnly] = useState(false);
+  const [excludeOverdue, setExcludeOverdue] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState({}); // {groupId: true} = collapsed
   const [taskOverrides,setTaskOverrides]=useState({});
   const [expTask,setExpTask]=useState(null);
@@ -2657,10 +2270,14 @@ function WorkTrackApp(p){
     let r=rows;
     const hasPerFilter=(f.fy||'all')!=='all'||(f.quarter||'all')!=='all'||(f.month||'all')!=='all';
     if(hasPerFilter) r=r.filter(x=>periodMatchesFilter(x.period, f));
-    if((f.status||'all')!=='all') r=r.filter(x=>x.status===f.status);
+    if((f.status||'all')!=='all'){
+      if(f.status==='active') r=r.filter(x=>!isClosedStatus(x.status));
+      else r=r.filter(x=>x.status===f.status);
+    }
     if((f.urgency||'all')!=='all') r=r.filter(x=>!isClosedStatus(x.status) && matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), f.urgency));
     if((f.subStatus||'all')!=='all') r=r.filter(x=>(x.subStatus||'')===(f.subStatus==='none'?'':f.subStatus)||(!x.subStatus&&f.subStatus==='none'));
     if((globalDueFilter||'all')!=='all') r=r.filter(x=>!isClosedStatus(x.status) && matchesUrgencyFilter(effectiveDue(x.due, x.nextHearing), globalDueFilter));
+    if(excludeOverdue) r=r.filter(x=>!isClosedStatus(x.status) && (effectiveDue(x.due,x.nextHearing)??1) >= 0);
     if(myTasksOnly) r=r.filter(x=>x.prep===CURRENT_USER||x.rev===CURRENT_USER);
     return r;
   };
@@ -2669,14 +2286,13 @@ function WorkTrackApp(p){
     const rows=filtForTask(ct.filter(x=>x.tid===td.id),td);
     return {total:rows.length,done:rows.filter(x=>isClosedStatus(x.status)).length,pending:rows.filter(x=>x.status==='pending').length,review:rows.filter(x=>x.status==='review').length,approved:rows.filter(x=>x.status==='approved').length};
   };
-  // Returns true if task type should be hidden (100% closed with no active filter)
   const taskTypeIs100Done = td => {
     const rows=ct.filter(x=>x.tid===td.id);
     if(!rows.length) return false;
+    // Only auto-hide if explicitly showing all statuses and everything is closed
     const f=getTaskFilter(td);
-    const hasAnyFilter=(f.status||'all')!=='all'||(f.fy||'all')!=='all'||(f.urgency||'all')!=='all'||(f.subStatus||'all')!=='all'||(globalDueFilter||'all')!=='all'||myTasksOnly;
-    if(hasAnyFilter) return false; // never auto-hide when filtering
-    return rows.every(x=>isClosedStatus(x.status));
+    // Never auto-hide — let the "X completed" chip handle it
+    return false;
   };
   const bStats = bid => {
     const tds=taskDefs.filter(t=>t.bucket===bid);
@@ -3291,7 +2907,7 @@ function WorkTrackApp(p){
     if(!allRows.length) return null;
     if(taskTypeIs100Done(td)) return null;
     // Hide if filter is active and no rows match
-    const hasGlobalFilter = (globalDueFilter||'all')!=='all' || myTasksOnly || !!globalClientFilter.trim();
+    const hasGlobalFilter = (globalDueFilter||'all')!=='all' || myTasksOnly || excludeOverdue || !!globalClientFilter.trim();
     if(hasGlobalFilter && filtered.length===0) return null;
     const open=expTask===td.id;
     const st={total:filtered.length,done:filtered.filter(x=>isClosedStatus(x.status)).length,pending:filtered.filter(x=>x.status==='pending').length,review:filtered.filter(x=>x.status==='review').length};
@@ -3302,15 +2918,25 @@ function WorkTrackApp(p){
       e('div',{onClick:()=>setExpTask(open?null:td.id),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #1C2B3A':'0.5px solid var(--color-border-tertiary)',borderBottom: open ? 'none' : '0.5px solid var(--color-border-tertiary)',borderLeft:open?'3px solid #2D6BE4':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',marginBottom:open?0:3,cursor:'pointer',background:open?'#1C2B3A':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
         e('span',{style:{fontSize:11,color:open?'rgba(255,255,255,0.7)':'var(--color-text-tertiary)'}},open?'▲':'▼'),
         e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:open?'#fff':'var(--color-text-primary)',minWidth:120}},td.label,hasOverride?e('span',{style:{fontSize:9,color:open?'#C3D8F9':'#2D6BE4',marginLeft:6,fontWeight:400}},'(custom filter)'):null),
-        open?e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch),dark:true,allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]}):e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
+        open?e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch),dark:true,allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]}):e('div',{style:{display:'flex',gap:4,flexWrap:'wrap',alignItems:'center'}},
           e(Pill,{k:'t'},st.total+' clients'),
-          st.done>0?e(Pill,{k:'d'},st.done+' done'):null,
+          // Show done count — clicking toggles to show/hide completed
+          (()=>{
+            const doneCount = allRows.filter(x=>isClosedStatus(x.status)).length;
+            const showingCompleted = (f.status||'active')==='all'||(f.status||'active')==='done'||(f.status||'active')==='cancelled';
+            if(doneCount===0) return null;
+            return e('span',{
+              onClick:ev=>{ev.stopPropagation(); setTaskOverride(td.id,{status: showingCompleted?'active':'all'});},
+              style:{fontSize:9,padding:'1px 7px',borderRadius:20,cursor:'pointer',border:'0.5px solid #93B4F0',
+                background:showingCompleted?'#2D6BE4':'#EBF2FF',color:showingCompleted?'#fff':'#2D6BE4',whiteSpace:'nowrap'}
+            }, showingCompleted ? '▲ Hide completed' : doneCount+' completed');
+          })(),
           st.review>0?e(Pill,{k:'r'},st.review+' review'):null,
           st.pending>0?e(Pill,{k:'p'},st.pending+' pending'):null
         ),
         hasOverride?e('span',{onClick:ev=>{ev.stopPropagation();clearTaskOverride(td.id);},style:{fontSize:9,color:open?'#C3D8F9':'var(--color-text-tertiary)',cursor:'pointer',textDecoration:'underline',whiteSpace:'nowrap'}},'reset'):null,
-        e('button',{onClick:ev=>{ev.stopPropagation();setBulkCreateTask(td);},title:'Create '+td.label+' for all clients in one go',style:{fontSize:9,padding:'3px 8px',border:'0.5px solid '+(open?'rgba(255,255,255,0.4)':'#93B4F0'),borderRadius:'var(--border-radius-md)',background:open?'rgba(255,255,255,0.15)':'#EBF2FF',color:open?'#fff':'#2D6BE4',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:3,whiteSpace:'nowrap'}},
-          e('i',{className:'ti ti-stack-2','aria-hidden':'true'}),'Create for all clients'),
+        e('button',{onClick:ev=>{ev.stopPropagation();setBulkCreateTask(td);},title:'Create next period for all clients',style:{fontSize:9,padding:'3px 8px',border:'0.5px solid '+(open?'rgba(255,255,255,0.4)':'#93B4F0'),borderRadius:'var(--border-radius-md)',background:open?'rgba(255,255,255,0.15)':'#EBF2FF',color:open?'#fff':'#2D6BE4',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:3,whiteSpace:'nowrap'}},
+          e('i',{className:'ti ti-calendar-plus','aria-hidden':'true'}),'Create next period'),
         e('div',{style:{fontSize:9,color:open?'rgba(255,255,255,0.7)':'var(--color-text-tertiary)',whiteSpace:'nowrap'}},pct+'%')
       ),
       open?ClientRows(filtered,td.id):null
@@ -3327,7 +2953,7 @@ function WorkTrackApp(p){
         if(taskTypeIs100Done(t)) return false;
         const allRows=ct.filter(x=>x.tid===t.id);
         if(!allRows.length) return false;
-        const hasGlobalFilter=(globalDueFilter||'all')!=='all'||myTasksOnly||!!globalClientFilter.trim();
+        const hasGlobalFilter=(globalDueFilter||'all')!=='all'||myTasksOnly||excludeOverdue||!!globalClientFilter.trim();
         if(hasGlobalFilter){
           const filtered=filtForTask(allRows,t);
           if(filtered.length===0) return false;
@@ -3756,9 +3382,14 @@ function WorkTrackApp(p){
             )
           ),
           globalDueFilter!=='all' ? e('span',{onClick:()=>setGlobalDueFilter('all'),style:{fontSize:9,color:'var(--color-text-tertiary)',cursor:'pointer',marginLeft:4}},'✕ Clear') : null,
-          e('label',{style:{display:'flex',alignItems:'center',gap:5,marginLeft:'auto',cursor:'pointer',fontSize:10,fontWeight:myTasksOnly?600:400,color:myTasksOnly?'#2D6BE4':'var(--color-text-secondary)',padding:'2px 8px',borderRadius:20,border:myTasksOnly?'0.5px solid #2D6BE4':'0.5px solid var(--color-border-tertiary)',background:myTasksOnly?'#EBF2FF':'transparent',whiteSpace:'nowrap'}},
-            e('input',{type:'checkbox',checked:myTasksOnly,onChange:ev=>setMyTasksOnly(ev.target.checked),style:{margin:0}}),
-            'My tasks only')
+          e('div',{style:{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}},
+            e('label',{style:{display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:10,fontWeight:excludeOverdue?600:400,color:excludeOverdue?'#C0392B':'var(--color-text-secondary)',padding:'2px 8px',borderRadius:20,border:excludeOverdue?'0.5px solid #C0392B':'0.5px solid var(--color-border-tertiary)',background:excludeOverdue?'#FEF2F2':'transparent',whiteSpace:'nowrap'}},
+              e('input',{type:'checkbox',checked:excludeOverdue,onChange:ev=>setExcludeOverdue(ev.target.checked),style:{margin:0}}),
+              'Exclude overdue'),
+            e('label',{style:{display:'flex',alignItems:'center',gap:5,cursor:'pointer',fontSize:10,fontWeight:myTasksOnly?600:400,color:myTasksOnly?'#2D6BE4':'var(--color-text-secondary)',padding:'2px 8px',borderRadius:20,border:myTasksOnly?'0.5px solid #2D6BE4':'0.5px solid var(--color-border-tertiary)',background:myTasksOnly?'#EBF2FF':'transparent',whiteSpace:'nowrap'}},
+              e('input',{type:'checkbox',checked:myTasksOnly,onChange:ev=>setMyTasksOnly(ev.target.checked),style:{margin:0}}),
+              'My tasks only')
+          )
         ) : null,
         bucket?e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,padding:'8px 10px',background:'var(--color-background-secondary)',borderRadius:'var(--border-radius-md)',flexWrap:'wrap',gap:8}},
           e('div',{style:{fontSize:10,color:'var(--color-text-tertiary)'}},'Default filter for all '+bi.label.toLowerCase()+' tasks (tasks can override below):'),
