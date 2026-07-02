@@ -1488,8 +1488,15 @@ function periodOptions(includeAll){
 function MiniFilterBar(p){
   const f=p.filter||BLANK_FILTER;
   const upd=patch=>p.onChange({...f,...patch});
-  const selStyle={fontSize:10,padding:'2px 4px',border:'0.5px solid var(--color-border-secondary)',borderRadius:'var(--border-radius-md)',background:'var(--color-background-primary)',color:'var(--color-text-primary)',cursor:'pointer'};
+  const dark = p.dark; // true when rendered on dark purple background
+  const selStyle={fontSize:10,padding:'2px 4px',borderRadius:'var(--border-radius-md)',cursor:'pointer',
+    border: dark ? '0.5px solid rgba(255,255,255,0.4)' : '0.5px solid var(--color-border-secondary)',
+    background: dark ? 'rgba(255,255,255,0.12)' : 'var(--color-background-primary)',
+    color: dark ? '#fff' : 'var(--color-text-primary)'
+  };
   const allSubStatuses = p.allSubStatuses || [];
+  const pillActive = {fontSize:9,padding:'1px 7px',borderRadius:20,cursor:'pointer',border:'0.5px solid '+(dark?'rgba(255,255,255,0.9)':'#AFA9EC'),color:dark?'#fff':'#534AB7',background:dark?'rgba(255,255,255,0.25)':'#EEEDFE',fontWeight:600};
+  const pillInactive = {fontSize:9,padding:'1px 7px',borderRadius:20,cursor:'pointer',border:'0.5px solid '+(dark?'rgba(255,255,255,0.3)':'var(--color-border-tertiary)'),color:dark?'rgba(255,255,255,0.7)':'var(--color-text-secondary)',background:'transparent'};
   return e('div',{style:{display:'flex',alignItems:'center',gap:4,flexWrap:'wrap'}},
     e('select',{value:f.fy||'all',onClick:ev=>ev.stopPropagation(),onChange:ev=>{ev.stopPropagation();upd({fy:ev.target.value});},style:{...selStyle,maxWidth:90}},
       [e('option',{key:'all',value:'all'},'All FY'),...FY_OPTIONS.map(fy=>e('option',{key:fy,value:fy},fy))]
@@ -1509,7 +1516,7 @@ function MiniFilterBar(p){
        e('option',{key:'none',value:'none'},'No progress set'),
        ...allSubStatuses.map(s=>e('option',{key:s,value:s},s))]
     ) : null,
-    p.showStatus!==false ? STATUSES.map(s=>e('span',{key:s,onClick:ev=>{ev.stopPropagation();upd({status:s});},style:{fontSize:9,padding:'1px 7px',border:(f.status||'all')===s?'0.5px solid #AFA9EC':'0.5px solid var(--color-border-tertiary)',borderRadius:20,cursor:'pointer',color:(f.status||'all')===s?'#534AB7':'var(--color-text-secondary)',background:(f.status||'all')===s?'#EEEDFE':'transparent'}},s==='all'?'All':s[0].toUpperCase()+s.slice(1))) : null
+    p.showStatus!==false ? STATUSES.map(s=>e('span',{key:s,onClick:ev=>{ev.stopPropagation();upd({status:s});},style:(f.status||'all')===s?pillActive:pillInactive},s==='all'?'All':s[0].toUpperCase()+s.slice(1))) : null
   );
 }
 
@@ -3190,7 +3197,7 @@ function WorkTrackApp(p){
           })(),
           r.resignNote ? e('div',{style:{padding:'6px 10px',fontSize:10,color:'#712B13',background:'#FAECE7',borderBottom:'0.5px solid #F0997B'}},e('i',{className:'ti ti-corner-up-left',style:{marginRight:4},'aria-hidden':'true'}),'Sent back to preparer: '+r.resignNote) : null,
           r.closedWithoutReview ? e('div',{style:{padding:'6px 10px',fontSize:10,color:'#712B13',background:'#FAECE7',borderBottom:'0.5px solid #F0997B'}},e('i',{className:'ti ti-shield-x',style:{marginRight:4},'aria-hidden':'true'}),'Closed without reviewer approval.') : null,
-          tdef && tdef.bucket==='assessment' ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+          tdef && tdef.bucket==='assessment' ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderTop:'1px dashed #AFA9EC',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
             e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}},
               e('div',{style:{fontSize:9,fontWeight:500,color:'#534AB7',letterSpacing:'.04em',textTransform:'uppercase'}},'Assessment details'),
               r.status==='done'?e('span',{style:{fontSize:9,color:'var(--color-text-tertiary)'}},'Read-only after closing — edit to update'):null
@@ -3243,7 +3250,7 @@ function WorkTrackApp(p){
               ) : e('div',{style:{marginTop:5,fontSize:9,color:'var(--color-text-tertiary)'}},'No hearing date set')
             )
           ) : null,
-          tdef && tdef.isCompliance ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
+          tdef && tdef.isCompliance ? e('div',{style:{padding:'8px 10px',background:'#F4F3FB',borderTop:'1px dashed #AFA9EC',borderBottom:'0.5px solid var(--color-border-tertiary)'}},
             e('div',{style:{fontSize:9,fontWeight:500,color:'#534AB7',letterSpacing:'.04em',textTransform:'uppercase',marginBottom:6}},'Filing record'),
             e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}},
               e('div',null,
@@ -3279,7 +3286,10 @@ function WorkTrackApp(p){
     const allRows=ct.filter(x=>x.tid===td.id);
     const filtered=filtForTask(allRows,td);
     if(!allRows.length) return null;
-    if(taskTypeIs100Done(td)) return null; // silently hide when 100% closed
+    if(taskTypeIs100Done(td)) return null;
+    // Hide if filter is active and no rows match
+    const hasGlobalFilter = (globalDueFilter||'all')!=='all' || myTasksOnly || !!globalClientFilter.trim();
+    if(hasGlobalFilter && filtered.length===0) return null;
     const open=expTask===td.id;
     const st={total:filtered.length,done:filtered.filter(x=>isClosedStatus(x.status)).length,pending:filtered.filter(x=>x.status==='pending').length,review:filtered.filter(x=>x.status==='review').length};
     const pct=st.total?Math.round(st.done/st.total*100):0;
@@ -3289,7 +3299,7 @@ function WorkTrackApp(p){
       e('div',{onClick:()=>setExpTask(open?null:td.id),style:{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',border:open?'0.5px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderBottom: open ? 'none' : '0.5px solid var(--color-border-tertiary)',borderLeft:open?'3px solid #534AB7':'0.5px solid var(--color-border-tertiary)',borderRadius:open?'var(--border-radius-md) var(--border-radius-md) 0 0':'var(--border-radius-md)',marginBottom:open?0:3,cursor:'pointer',background:open?'#534AB7':'var(--color-background-primary)',flexWrap:'wrap',rowGap:6}},
         e('span',{style:{fontSize:11,color:open?'rgba(255,255,255,0.7)':'var(--color-text-tertiary)'}},open?'▲':'▼'),
         e('div',{style:{flex:1,fontSize:13,fontWeight:500,color:open?'#fff':'var(--color-text-primary)',minWidth:120}},td.label,hasOverride?e('span',{style:{fontSize:9,color:open?'#D0CEFE':'#534AB7',marginLeft:6,fontWeight:400}},'(custom filter)'):null),
-        open?e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch),allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]}):e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
+        open?e(MiniFilterBar,{filter:f,onChange:patch=>setTaskOverride(td.id,patch),dark:true,allSubStatuses:[...(subStatuses.pending||[]),...(subStatuses.approved||[])]}):e('div',{style:{display:'flex',gap:4,flexWrap:'wrap'}},
           e(Pill,{k:'t'},st.total+' clients'),
           st.done>0?e(Pill,{k:'d'},st.done+' done'):null,
           st.review>0?e(Pill,{k:'r'},st.review+' review'):null,
