@@ -3078,7 +3078,7 @@ function WorkTrackApp(p){
       const isDraftOpen=nextOccurDraft && nextOccurDraft.rowId===r.id;
       const samePerson = r.prep===r.rev;
       const rowBg = open ? '#E8F1FF' : rowIdx%2===0 ? 'var(--color-background-primary)' : '#FAFAFE';
-      return e('div',{key:k},
+      return e('div',{key:k,style:open?{outline:'2px dashed #2D6BE4',outlineOffset:'-1px',borderRadius:'var(--border-radius-md)',marginBottom:2}:{}},
         e('div',{onClick:()=>setExpCl(open?null:k),style:{display:'grid',gridTemplateColumns:'20px 1fr 64px 72px 44px 64px 16px',gap:6,alignItems:'center',padding:'7px 10px',borderBottom:'0.5px solid var(--color-border-tertiary)',cursor:'pointer',borderLeft:open?'3px solid #2D6BE4':'3px solid transparent',background:rowBg,transition:'background 0.1s'}},
           e(Chk,{state:r.status==='done'?'done':r.status==='review'?'review':r.status==='approved'?'approved':'pending',onClick:()=>{
             const isPreparer=r.prep===CURRENT_USER;
@@ -3320,7 +3320,21 @@ function WorkTrackApp(p){
   const GroupedTasks=tdList=>e(React.Fragment,null,[
     ...groups.map(g=>{
       const gt=tdList.filter(t=>t.group===g.id);
+      // Hide category if no task types have any assignments
       if(!gt.some(t=>ct.some(x=>x.tid===t.id))) return null;
+      // Hide category if all task types would render null (100% done or filtered out)
+      const visibleTasks = gt.filter(t=>{
+        if(taskTypeIs100Done(t)) return false;
+        const allRows=ct.filter(x=>x.tid===t.id);
+        if(!allRows.length) return false;
+        const hasGlobalFilter=(globalDueFilter||'all')!=='all'||myTasksOnly||!!globalClientFilter.trim();
+        if(hasGlobalFilter){
+          const filtered=filtForTask(allRows,t);
+          if(filtered.length===0) return false;
+        }
+        return true;
+      });
+      if(!visibleTasks.length) return null;
       return e('div',{key:g.id},
         e('div',{style:{display:'flex',alignItems:'center',gap:6,padding:'5px 0 4px',borderBottom:'0.5px solid var(--color-border-tertiary)',marginBottom:5,marginTop:10}},
           e('span',{style:{fontSize:11,fontWeight:500,color:'var(--color-text-secondary)'}},g.label)),
