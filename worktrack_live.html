@@ -244,6 +244,10 @@ function sheetToWorkbook(wb, sheetName, rows, columns){
   if(!wb.SheetNames.includes(sheetName)) wb.SheetNames.push(sheetName);
 }
 
+const DEFAULT_SUB_STATUSES = {
+  pending:  ['Not started','Email sent','Partial data received','Full data received','Work in progress'],
+  approved: ['Pending submission','Pending client approval'],
+};
 function rowsToApp(sharedWb, privateWb, isReviewer){
   const clients = parseSheet(sharedWb,'Clients').map(r=>({id:r.ID,name:r.Name,defaultFreq:r.DefaultFreq||'none'}));
   const taskDefs = parseSheet(sharedWb,'TaskTypes').map(r=>({id:r.ID,label:r.Label,group:r.Group,bucket:r.Bucket,isCompliance:r.IsCompliance==='true'||r.IsCompliance===true||r.IsCompliance==='TRUE'}));
@@ -830,10 +834,6 @@ const DEFAULT_REF_LABELS = {ref1:'Notice No.', ref2:'AO Order Ref', ref3:'Hearin
 
 // Sub-statuses per workflow stage — reviewer-controlled master list
 // These are defaults; actual values come from Settings sheet
-const DEFAULT_SUB_STATUSES = {
-  pending:  ['Not started','Email sent','Partial data received','Full data received','Work in progress'],
-  approved: ['Pending submission','Pending client approval'],
-};
 const FREQUENCIES = [{id:'none',label:'No recurrence'},{id:'monthly',label:'Monthly'},{id:'quarterly',label:'Quarterly'},{id:'yearly',label:'Yearly'}];
 
 const INIT_TASK_DEFS = [
